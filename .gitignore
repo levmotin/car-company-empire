@@ -1,0 +1,9 @@
+# Godot-generated cache and imported resources
+.godot/
+
+# Exported builds
+build/
+exports/
+
+# macOS
+.DS_Store
