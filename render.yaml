@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: car-company-empire-online
+    runtime: node
+    plan: free
+    buildCommand: npm install --production
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeployTrigger: commit

@@ -16,10 +16,22 @@ var right_leg: Node3D
 var left_arm: Node3D
 var right_arm: Node3D
 var walk_phase := 0.0
+var remote_proxy := false
+var remote_target_position := Vector3.ZERO
+var remote_target_yaw := 0.0
+var remote_is_moving := false
+var remote_company := ""
+var remote_color := Color("#1677ff")
+
+func configure_remote(company: String, color: Color) -> void:
+	remote_proxy = true
+	enabled = false
+	remote_company = company
+	remote_color = color
 
 func _ready() -> void:
 	add_to_group("player")
-	collision_layer = 2
+	collision_layer = 0 if remote_proxy else 2
 	collision_mask = 1
 	floor_snap_length = 0.35
 	floor_max_angle = deg_to_rad(48.0)
@@ -46,7 +58,33 @@ func _ready() -> void:
 	camera = Camera3D.new()
 	camera.fov = 68.0
 	spring_arm.add_child(camera)
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if remote_proxy:
+		_apply_remote_appearance()
+	else:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+func _apply_remote_appearance() -> void:
+	for child in body_visual.get_children():
+		if child is MeshInstance3D:
+			var material := child.material_override as StandardMaterial3D
+			if material and material.albedo_color.is_equal_approx(Color("#175cd3")):
+				var remote_material := material.duplicate() as StandardMaterial3D
+				remote_material.albedo_color = remote_color
+				child.material_override = remote_material
+	var nameplate := Label3D.new()
+	nameplate.text = remote_company
+	nameplate.position = Vector3(0, 2.35, 0)
+	nameplate.font_size = 34
+	nameplate.outline_size = 7
+	nameplate.modulate = remote_color.lightened(0.35)
+	nameplate.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	nameplate.no_depth_test = true
+	add_child(nameplate)
+
+func apply_remote_state(target_position: Vector3, facing_yaw: float, moving: bool) -> void:
+	remote_target_position = target_position
+	remote_target_yaw = facing_yaw
+	remote_is_moving = moving
 
 func _build_character() -> void:
 	var jacket := StandardMaterial3D.new()
@@ -87,6 +125,8 @@ func _mesh_part(mesh: Mesh, pos: Vector3, scale_value: Vector3, material: Materi
 	body_visual.add_child(part)
 
 func _input(event: InputEvent) -> void:
+	if remote_proxy:
+		return
 	if event is InputEventMouseMotion and enabled and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		yaw -= event.relative.x * 0.0032
 		pitch = clamp(pitch - event.relative.y * 0.0028, -0.95, 0.32)
@@ -94,6 +134,11 @@ func _input(event: InputEvent) -> void:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED else Input.MOUSE_MODE_CAPTURED
 
 func _physics_process(delta: float) -> void:
+	if remote_proxy:
+		global_position = global_position.lerp(remote_target_position, minf(1.0, delta * 12.0))
+		body_visual.rotation.y = lerp_angle(body_visual.rotation.y, remote_target_yaw, minf(1.0, delta * 12.0))
+		_animate_walk(delta, remote_is_moving, walk_speed)
+		return
 	if not enabled:
 		velocity = Vector3.ZERO
 		return

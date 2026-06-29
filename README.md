@@ -13,6 +13,16 @@ Open the project in Godot 4.7 and run it, or launch from the project folder:
 Choose a company name and brand color, enter the starter car, visit suppliers,
 manufacture vehicles at the factory, and sell them at the dealership.
 
+## Online multiplayer
+
+Choose **Play Online** to enter the shared live world. Browser and desktop
+players connect through the hosted WebSocket service, so friends can see one
+another walking and driving without port forwarding. Each player currently
+keeps independent business progression while company owners and their driven
+cars are synchronized in real time.
+
+Choose **Play Solo** when you do not want to join the shared world.
+
 ## Controls
 
 - `WASD` — walk / drive

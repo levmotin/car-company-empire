@@ -2,6 +2,8 @@ extends Node3D
 
 const PlayerScript = preload("res://scripts/player.gd")
 const VehicleScript = preload("res://scripts/vehicle.gd")
+const ONLINE_SERVER_URL := "wss://car-company-empire-online.onrender.com/multiplayer"
+const NETWORK_SEND_INTERVAL := 0.05
 
 var player: EmpirePlayer
 var current_vehicle: EmpireVehicle
@@ -42,6 +44,15 @@ var style_panel: StyleBoxFlat
 var style_button: StyleBoxFlat
 var city_model_cache := {}
 var factory_plots: Array[Node3D] = []
+var online_mode := "solo"
+var online_status_label: Label
+var online_peers := {}
+var remote_players := {}
+var remote_vehicles := {}
+var network_send_accumulator := 0.0
+var online_socket: WebSocketPeer
+var online_peer_id := 0
+var online_connected := false
 
 func _ready() -> void:
 	_setup_styles()
@@ -1437,6 +1448,15 @@ func _build_ui() -> void:
 	toast.add_theme_stylebox_override("normal", style_panel)
 	toast.modulate.a = 0.0
 	hud.add_child(toast)
+	online_status_label = Label.new()
+	online_status_label.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	online_status_label.position = Vector2(-320, 24)
+	online_status_label.size = Vector2(294, 40)
+	online_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	online_status_label.add_theme_font_size_override("font_size", 15)
+	online_status_label.add_theme_color_override("font_color", Color("#8fe7ff"))
+	online_status_label.text = "SOLO"
+	hud.add_child(online_status_label)
 	# Modal shell
 	modal = PanelContainer.new()
 	modal.add_theme_stylebox_override("panel", style_panel)
@@ -1460,8 +1480,8 @@ func _show_company_setup() -> void:
 	var card := PanelContainer.new()
 	card.add_theme_stylebox_override("panel", style_panel)
 	card.set_anchors_preset(Control.PRESET_CENTER)
-	card.position = Vector2(-330, -285)
-	card.size = Vector2(660, 570)
+	card.position = Vector2(-350, -330)
+	card.size = Vector2(700, 660)
 	company_setup.add_child(card)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 16)
@@ -1520,12 +1540,54 @@ func _show_company_setup() -> void:
 	features.add_theme_font_size_override("font_size", 15)
 	features.add_theme_color_override("font_color", Color("#d1dce5"))
 	box.add_child(features)
-	var launch := _ui_button("LAUNCH COMPANY")
-	launch.custom_minimum_size.y = 58
-	launch.pressed.connect(_launch_company.bind(name_input))
-	box.add_child(launch)
+	var online_label := Label.new()
+	online_label.text = "LIVE ONLINE WORLD  •  PLAY TOGETHER"
+	online_label.add_theme_font_size_override("font_size", 13)
+	online_label.add_theme_color_override("font_color", Color("#63d5ff"))
+	box.add_child(online_label)
+	var launch_row := HBoxContainer.new()
+	launch_row.add_theme_constant_override("separation", 10)
+	box.add_child(launch_row)
+	var solo := _ui_button("PLAY SOLO")
+	solo.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	solo.custom_minimum_size.y = 58
+	solo.pressed.connect(_launch_company.bind(name_input))
+	launch_row.add_child(solo)
+	var online := _ui_button("PLAY ONLINE")
+	online.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	online.custom_minimum_size.y = 58
+	online.pressed.connect(_launch_online.bind(name_input))
+	launch_row.add_child(online)
 
 func _launch_company(name_input: LineEdit) -> void:
+	online_mode = "solo"
+	_finish_company_launch(name_input)
+
+func _launch_online(name_input: LineEdit) -> void:
+	company_name = name_input.text.strip_edges().to_upper()
+	if company_name.is_empty():
+		company_name = "NOVA MOTORS"
+	online_socket = WebSocketPeer.new()
+	var error := online_socket.connect_to_url(_online_server_url())
+	if error != OK:
+		online_mode = "solo"
+		_finish_company_launch(name_input)
+		_show_toast("Online world could not start (error %d). Playing solo." % error)
+		return
+	online_mode = "connecting"
+	online_connected = false
+	online_peer_id = 0
+	_finish_company_launch(name_input)
+	online_status_label.text = "ONLINE  •  CONNECTING…"
+	_show_toast("Joining the shared online world…")
+
+func _online_server_url() -> String:
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--online-url="):
+			return argument.trim_prefix("--online-url=")
+	return ONLINE_SERVER_URL
+
+func _finish_company_launch(name_input: LineEdit) -> void:
 	company_name = name_input.text.strip_edges().to_upper()
 	if company_name.is_empty():
 		company_name = "NOVA MOTORS"
@@ -1541,7 +1603,8 @@ func _launch_company(name_input: LineEdit) -> void:
 		if bool(plot.get_meta("is_local_owner", false)):
 			plot.set_meta("owner_company", company_name)
 	_refresh_hud()
-	_show_toast("Welcome, CEO. Your factory is operational.")
+	if online_mode == "solo":
+		_show_toast("Welcome, CEO. Your factory is operational.")
 
 func _select_brand_color(color: Color, selected_button: Button, group: HBoxContainer) -> void:
 	brand_color = color
@@ -1566,6 +1629,7 @@ func _input(event: InputEvent) -> void:
 func _process(delta: float) -> void:
 	time_of_day += delta * 0.025
 	sun.rotation_degrees.x = -48.0 + sin(time_of_day * 0.25) * 10.0
+	_update_online_multiplayer(delta)
 	if company_setup and is_instance_valid(company_setup):
 		return
 	_update_nearest()
@@ -1578,6 +1642,8 @@ func _update_nearest() -> void:
 	var origin := current_vehicle.global_position if current_vehicle else player.global_position
 	if not current_vehicle:
 		for vehicle in get_tree().get_nodes_in_group("vehicles"):
+			if bool(vehicle.get_meta("online_remote", false)):
+				continue
 			var d: float = origin.distance_to(vehicle.global_position)
 			if d < best:
 				best = d
@@ -1928,3 +1994,200 @@ func set_driving(value: bool, vehicle: EmpireVehicle) -> void:
 
 func update_vehicle_hud(kph: float, vehicle_name: String) -> void:
 	speed_label.text = "%03d\nKM/H\n%s" % [int(kph), vehicle_name]
+
+func _update_online_multiplayer(delta: float) -> void:
+	if online_mode == "solo" or online_socket == null:
+		return
+	online_socket.poll()
+	var ready_state := online_socket.get_ready_state()
+	if ready_state == WebSocketPeer.STATE_OPEN:
+		if not online_connected:
+			online_connected = true
+			_send_online_message({
+				"type": "join",
+				"company": company_name,
+				"color": brand_color.to_html(),
+			})
+		while online_socket.get_available_packet_count() > 0:
+			var packet := online_socket.get_packet()
+			var parsed = JSON.parse_string(packet.get_string_from_utf8())
+			if parsed is Dictionary:
+				_handle_online_message(parsed)
+	elif ready_state == WebSocketPeer.STATE_CLOSED:
+		var was_online := online_connected
+		_clear_online_session()
+		if was_online:
+			_show_toast("Connection lost. You are now playing solo.")
+		else:
+			_show_toast("Could not reach the online world. Playing solo.")
+		return
+	else:
+		return
+	if online_peer_id == 0:
+		return
+	network_send_accumulator += delta
+	if network_send_accumulator < NETWORK_SEND_INTERVAL:
+		return
+	network_send_accumulator = 0.0
+	var position_to_send := player.global_position
+	var yaw_to_send := player.body_visual.rotation.y
+	var moving := player.velocity.length_squared() > 0.5
+	var driving := current_vehicle != null
+	if driving:
+		position_to_send = current_vehicle.global_position
+		yaw_to_send = current_vehicle.rotation.y
+		moving = absf(current_vehicle.speed) > 0.5
+	_send_online_message({
+		"type": "state",
+		"x": position_to_send.x,
+		"y": position_to_send.y,
+		"z": position_to_send.z,
+		"yaw": yaw_to_send,
+		"moving": moving,
+		"driving": driving,
+	})
+
+func _send_online_message(message: Dictionary) -> void:
+	if online_socket and online_socket.get_ready_state() == WebSocketPeer.STATE_OPEN:
+		online_socket.send_text(JSON.stringify(message))
+
+func _handle_online_message(message: Dictionary) -> void:
+	var message_type := str(message.get("type", ""))
+	match message_type:
+		"welcome":
+			online_peer_id = int(message.get("id", 0))
+			online_mode = "online"
+			online_peers[online_peer_id] = {
+				"company": company_name,
+				"color": brand_color.to_html(),
+			}
+			var players = message.get("players", [])
+			if players is Array:
+				for player_data in players:
+					if player_data is Dictionary:
+						_receive_online_identity(player_data)
+			_update_online_status()
+			_show_toast("Connected. You and your friends now share this world.")
+		"player_joined":
+			_receive_online_identity(message)
+		"player_left":
+			var departed_id := int(message.get("id", 0))
+			online_peers.erase(departed_id)
+			_remove_remote_peer(departed_id)
+			_update_online_status()
+		"state":
+			var peer_id := int(message.get("id", 0))
+			if peer_id == 0 or peer_id == online_peer_id:
+				return
+			var remote_position := Vector3(
+				float(message.get("x", 0.0)),
+				float(message.get("y", 0.1)),
+				float(message.get("z", 0.0))
+			)
+			_apply_remote_state(
+				peer_id,
+				remote_position,
+				float(message.get("yaw", 0.0)),
+				bool(message.get("moving", false)),
+				bool(message.get("driving", false))
+			)
+
+func _receive_online_identity(player_data: Dictionary) -> void:
+	var peer_id := int(player_data.get("id", 0))
+	if peer_id == 0 or peer_id == online_peer_id:
+		return
+	var remote_company := str(player_data.get("company", "ONLINE MOTORS")).left(32)
+	var remote_color_html := str(player_data.get("color", "1677ff"))
+	online_peers[peer_id] = {
+		"company": remote_company,
+		"color": remote_color_html,
+	}
+	_spawn_remote_peer(peer_id, remote_company, Color(remote_color_html))
+	if player_data.has("state") and player_data.state is Dictionary:
+		var state: Dictionary = player_data.state
+		_apply_remote_state(
+			peer_id,
+			Vector3(
+				float(state.get("x", 0.0)),
+				float(state.get("y", 0.1)),
+				float(state.get("z", 0.0))
+			),
+			float(state.get("yaw", 0.0)),
+			bool(state.get("moving", false)),
+			bool(state.get("driving", false))
+		)
+	_update_online_status()
+
+func _clear_online_session() -> void:
+	for peer_id in remote_players.keys():
+		_remove_remote_peer(int(peer_id))
+	online_peers.clear()
+	online_socket = null
+	online_peer_id = 0
+	online_connected = false
+	online_mode = "solo"
+	_update_online_status()
+
+func _update_online_status() -> void:
+	if not online_status_label:
+		return
+	if online_mode == "solo":
+		online_status_label.text = "SOLO"
+		return
+	var count := online_peers.size()
+	if online_mode == "connecting":
+		online_status_label.text = "ONLINE  •  CONNECTING…"
+	else:
+		online_status_label.text = "ONLINE  •  %d PLAYER%s" % [count, "" if count == 1 else "S"]
+
+func _spawn_remote_peer(peer_id: int, remote_company: String, remote_color: Color) -> void:
+	if peer_id == online_peer_id or remote_players.has(peer_id):
+		return
+	var remote := PlayerScript.new()
+	remote.name = "OnlinePlayer_%d" % peer_id
+	remote.configure_remote(remote_company, remote_color)
+	remote.position = Vector3(-86 if peer_id % 2 == 0 else 86, 0.1, 52)
+	add_child(remote)
+	remote.remote_target_position = remote.global_position
+	remote_players[peer_id] = remote
+
+func _remove_remote_peer(peer_id: int) -> void:
+	if remote_players.has(peer_id):
+		var remote: Node = remote_players[peer_id]
+		if is_instance_valid(remote):
+			remote.queue_free()
+		remote_players.erase(peer_id)
+	if remote_vehicles.has(peer_id):
+		var remote_vehicle: Node = remote_vehicles[peer_id]
+		if is_instance_valid(remote_vehicle):
+			remote_vehicle.queue_free()
+		remote_vehicles.erase(peer_id)
+
+func _apply_remote_state(peer_id: int, remote_position: Vector3, remote_yaw: float, moving: bool, driving: bool) -> void:
+	if not remote_players.has(peer_id) or not is_instance_valid(remote_players[peer_id]):
+		return
+	var remote: EmpirePlayer = remote_players[peer_id]
+	remote.visible = not driving
+	remote.apply_remote_state(remote_position, remote_yaw, moving)
+	if driving:
+		var remote_vehicle: EmpireVehicle
+		if not remote_vehicles.has(peer_id) or not is_instance_valid(remote_vehicles[peer_id]):
+			var identity: Dictionary = online_peers.get(peer_id, {"company": "ONLINE", "color": "1677ff"})
+			remote_vehicle = VehicleScript.new()
+			remote_vehicle.name = "OnlineVehicle_%d" % peer_id
+			remote_vehicle.set_meta("online_remote", true)
+			remote_vehicle.setup(self, Color(str(identity.color)), str(identity.company) + " CAR", 1)
+			add_child(remote_vehicle)
+			remote_vehicle.collision_layer = 0
+			remote_vehicle.collision_mask = 0
+			remote_vehicle.global_position = remote_position
+			remote_vehicle.rotation.y = remote_yaw
+			remote_vehicle.set_physics_process(false)
+			remote_vehicles[peer_id] = remote_vehicle
+		else:
+			remote_vehicle = remote_vehicles[peer_id]
+		remote_vehicle.visible = true
+		remote_vehicle.global_position = remote_vehicle.global_position.lerp(remote_position, 0.6)
+		remote_vehicle.rotation.y = lerp_angle(remote_vehicle.rotation.y, remote_yaw, 0.6)
+	elif remote_vehicles.has(peer_id) and is_instance_valid(remote_vehicles[peer_id]):
+		remote_vehicles[peer_id].visible = false
