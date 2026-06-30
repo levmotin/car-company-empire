@@ -72,6 +72,8 @@ async function run() {
   assert.equal(secondWelcome.username, secondAccount.account.username);
   assert.equal(secondJoined.username, secondAccount.account.username);
   assert.equal(secondWelcome.players[0].username, firstAccount.account.username);
+  assert.notEqual(firstWelcome.factory_slot, secondWelcome.factory_slot);
+  assert.equal(secondJoined.factory_slot, secondWelcome.factory_slot);
 
   const saveResponse = await fetch(`${apiUrl}/progress`, {
     method: "PUT",

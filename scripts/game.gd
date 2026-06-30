@@ -48,6 +48,10 @@ var style_panel: StyleBoxFlat
 var style_button: StyleBoxFlat
 var city_model_cache := {}
 var factory_plots: Array[Node3D] = []
+var factory_slot_centers: Array[Vector3] = []
+var factory_slot_terminals := {}
+var factory_peer_slots := {}
+var local_factory_slot := -1
 var online_mode := "menu"
 var online_status_label: Label
 var online_roster_panel: PanelContainer
@@ -144,14 +148,13 @@ func _build_world() -> void:
 func _build_clean_map() -> void:
 	# One continuous collider under the entire town. Everything at street level
 	# is visual geometry, so there are no hidden curbs or stacked road colliders.
-	_box("Terrain", Vector3(0, -0.55, 0), Vector3(560, 1, 560), Color("#69a45d"), true)
+	_box("Terrain", Vector3(180, -0.55, 0), Vector3(1140, 1, 900), Color("#69a45d"), true)
 	_build_clean_road_grid()
 	_build_clean_downtown()
-	_build_clean_factory()
 	_build_clean_dealership()
 	_build_clean_suppliers()
 	_build_clean_residential()
-	_build_rival_factory()
+	_build_online_factory_park()
 	_build_clean_airport()
 	_build_clean_harbor()
 	_build_reclaimed_neighborhood()
@@ -539,6 +542,51 @@ func _build_clean_downtown() -> void:
 	_spawn_city_model("res://assets/city/kenney/building-n.glb", Vector3(13, 0, 12), 9.0, PI, Vector3(20, 23, 16))
 	_sign(Vector3(-80, 8, -49), "DOWNTOWN", Color("#6edcff"))
 
+func _build_online_factory_park() -> void:
+	# Sixteen distinct plots match the server's player limit. The road grid keeps
+	# every company accessible without placing players on top of one another.
+	_clean_asphalt(Vector3(480, -0.03, 0), Vector3(440, 0.025, 18))
+	for road_z in [-240.0, -120.0, 0.0, 120.0, 240.0]:
+		_clean_asphalt(Vector3(490, -0.025, road_z), Vector3(430, 0.025, 14))
+	for road_x in [290.0, 390.0, 490.0, 590.0, 690.0]:
+		_clean_asphalt(Vector3(road_x, -0.024, 0), Vector3(14, 0.025, 500))
+	_sign(Vector3(490, 11, -270), "ONLINE COMPANY DISTRICT", Color("#73ddff"))
+	for row in range(4):
+		for column in range(4):
+			var slot := row * 4 + column
+			var center := Vector3(340.0 + column * 100.0, 0, -180.0 + row * 120.0)
+			factory_slot_centers.append(center)
+			_build_factory_slot(center, slot)
+
+func _build_factory_slot(center: Vector3, slot: int) -> void:
+	_register_factory_plot(center, 0, "AVAILABLE FACTORY", false)
+	var plot: Node3D = factory_plots.back()
+	plot.name = "FactoryPlot_%02d" % (slot + 1)
+	plot.set_meta("factory_slot", slot)
+	_clean_lot(center, Vector3(82, 0, 96), Color("#858d90"))
+	_building(center + Vector3(0, 6.0, 10), Vector3(72, 12, 48), Color("#d3d8da"))
+	var sign_label := _sign(center + Vector3(0, 11.2, -16), "AVAILABLE FACTORY", Color("#6cb9ff"))
+	plot.set_meta("sign_label", sign_label)
+	_sign(center + Vector3(0, 5.8, 38), "FACTORY %02d" % (slot + 1), Color("#8bc8ff"))
+	var terminals: Array[Node3D] = []
+	for terminal_data in [
+		["factory", "ASSEMBLY LINE", -24.0, Color("#ff8a38")],
+		["storage", "PARTS STORAGE", 0.0, Color("#39c7ff")],
+		["design", "DESIGN STUDIO", 24.0, Color("#b87cff")],
+	]:
+		var role := str(terminal_data[0])
+		var terminal := _terminal(
+			center + Vector3(float(terminal_data[2]), 1.1, -38),
+			"rival_factory",
+			"UNASSIGNED FACTORY",
+			terminal_data[3]
+		)
+		terminal.set_meta("factory_slot", slot)
+		terminal.set_meta("factory_role", role)
+		terminal.set_meta("factory_title", str(terminal_data[1]))
+		terminals.append(terminal)
+	factory_slot_terminals[slot] = terminals
+
 func _build_clean_factory() -> void:
 	var center := Vector3(80, 0, 80)
 	_register_factory_plot(center, 1, company_name, true)
@@ -573,6 +621,67 @@ func _register_factory_plot(center: Vector3, owner_peer_id: int, owner_name: Str
 	plot.add_to_group("factory_plots")
 	add_child(plot)
 	factory_plots.append(plot)
+
+func _assign_factory_owner(peer_id: int, slot: int, owner_company: String, is_local: bool) -> void:
+	if slot < 0 or slot >= factory_slot_centers.size():
+		return
+	factory_peer_slots[peer_id] = slot
+	var plot: Node3D = factory_plots[slot]
+	plot.set_meta("owner_peer_id", peer_id)
+	plot.set_meta("owner_company", owner_company)
+	plot.set_meta("is_local_owner", is_local)
+	var sign_label := plot.get_meta("sign_label") as Label3D
+	if sign_label:
+		sign_label.text = owner_company
+		sign_label.modulate = brand_color if is_local else Color("#6cb9ff")
+	var terminals: Array = factory_slot_terminals.get(slot, [])
+	for terminal in terminals:
+		if is_local:
+			terminal.set_meta("kind", str(terminal.get_meta("factory_role")))
+			terminal.set_meta("title", str(terminal.get_meta("factory_title")))
+		else:
+			terminal.set_meta("kind", "rival_factory")
+			terminal.set_meta("title", "VISIT " + owner_company)
+
+func _release_factory_owner(peer_id: int) -> void:
+	if not factory_peer_slots.has(peer_id):
+		return
+	var slot := int(factory_peer_slots[peer_id])
+	factory_peer_slots.erase(peer_id)
+	if slot < 0 or slot >= factory_plots.size():
+		return
+	var plot: Node3D = factory_plots[slot]
+	plot.set_meta("owner_peer_id", 0)
+	plot.set_meta("owner_company", "AVAILABLE FACTORY")
+	plot.set_meta("is_local_owner", false)
+	var sign_label := plot.get_meta("sign_label") as Label3D
+	if sign_label:
+		sign_label.text = "AVAILABLE FACTORY"
+		sign_label.modulate = Color("#6cb9ff")
+	for terminal in factory_slot_terminals.get(slot, []):
+		terminal.set_meta("kind", "rival_factory")
+		terminal.set_meta("title", "UNASSIGNED FACTORY")
+
+func _assign_local_factory(slot: int) -> void:
+	if slot < 0 or slot >= factory_slot_centers.size():
+		return
+	local_factory_slot = slot
+	_assign_factory_owner(online_peer_id, slot, company_name, true)
+	var center := factory_slot_centers[slot]
+	player.global_position = center + Vector3(-10, 0.1, -48)
+	starter_vehicle.global_position = center + Vector3(10, 0.1, -48)
+	starter_vehicle.rotation.y = PI
+	for index in range(manufactured_vehicles.size()):
+		var vehicle := manufactured_vehicles[index]
+		if is_instance_valid(vehicle):
+			vehicle.global_position = _factory_parking_position(index)
+			vehicle.rotation.y = PI
+
+func _factory_parking_position(index: int) -> Vector3:
+	if local_factory_slot >= 0 and local_factory_slot < factory_slot_centers.size():
+		var center := factory_slot_centers[local_factory_slot]
+		return center + Vector3(-24.0 + (index % 3) * 24.0, 0.1, 34.0 + (index / 3) * 9.0)
+	return Vector3(60 + (index % 3) * 20.0, 0.1, 51 + (index / 3) * 10.0)
 
 func _build_clean_dealership() -> void:
 	var center := Vector3(0, 0, 80)
@@ -1316,7 +1425,7 @@ func _box(node_name: String, pos: Vector3, size: Vector3, color: Color, collisio
 		root.add_child(collider)
 	return root
 
-func _sign(pos: Vector3, text: String, color: Color) -> void:
+func _sign(pos: Vector3, text: String, color: Color) -> Label3D:
 	var label := Label3D.new()
 	label.position = pos
 	label.text = text
@@ -1326,8 +1435,9 @@ func _sign(pos: Vector3, text: String, color: Color) -> void:
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.no_depth_test = true
 	add_child(label)
+	return label
 
-func _terminal(pos: Vector3, kind: String, title: String, color: Color) -> void:
+func _terminal(pos: Vector3, kind: String, title: String, color: Color) -> Node3D:
 	var terminal := Node3D.new()
 	terminal.position = pos
 	terminal.set_meta("kind", kind)
@@ -1357,6 +1467,7 @@ func _terminal(pos: Vector3, kind: String, title: String, color: Color) -> void:
 	marker.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	marker.no_depth_test = true
 	terminal.add_child(marker)
+	return terminal
 
 func _spawn_player() -> void:
 	player = PlayerScript.new()
@@ -1892,7 +2003,7 @@ func _spawn_saved_vehicle(car_data: Dictionary) -> void:
 	var quality := maxi(1, int(car_data.get("quality", 1)))
 	car.setup(self, car_color, model_name, quality)
 	var parking_index := manufactured_vehicles.size()
-	car.position = Vector3(60 + (parking_index % 3) * 20.0, 0.1, 51 + (parking_index / 3) * 10.0)
+	car.position = _factory_parking_position(parking_index)
 	car.rotation.y = PI
 	add_child(car)
 	manufactured_vehicles.append(car)
@@ -2297,7 +2408,7 @@ func _manufacture(model_name_input: LineEdit) -> void:
 	var car := VehicleScript.new()
 	car.setup(self, brand_color.lightened(0.045 * (total_built % 4)), model_name, research + 1)
 	var parking_index := manufactured_vehicles.size()
-	car.position = Vector3(60 + (parking_index % 3) * 20.0, 0.1, 51 + (parking_index / 3) * 10.0)
+	car.position = _factory_parking_position(parking_index)
 	car.rotation.y = PI
 	add_child(car)
 	manufactured_vehicles.append(car)
@@ -2479,10 +2590,12 @@ func _handle_online_message(message: Dictionary) -> void:
 			online_peer_id = int(message.get("id", 0))
 			player_username = str(message.get("username", player_username))
 			online_mode = "online"
+			_assign_local_factory(int(message.get("factory_slot", 0)))
 			online_peers[online_peer_id] = {
 				"username": player_username,
 				"company": company_name,
 				"color": brand_color.to_html(),
+				"factory_slot": local_factory_slot,
 			}
 			var players = message.get("players", [])
 			if players is Array:
@@ -2497,6 +2610,8 @@ func _handle_online_message(message: Dictionary) -> void:
 		"auth_error":
 			auth_token = ""
 			_show_connection_failure(str(message.get("error", "Session expired. Sign in again.")))
+		"world_full":
+			_show_connection_failure(str(message.get("error", "Every factory plot is occupied.")))
 		"player_joined":
 			_receive_online_identity(message)
 			_show_toast("%s joined the online world." % str(message.get("username", "A player")))
@@ -2532,12 +2647,15 @@ func _receive_online_identity(player_data: Dictionary) -> void:
 	var remote_username := str(player_data.get("username", "DRIVER")).left(18)
 	var remote_company := str(player_data.get("company", "ONLINE MOTORS")).left(32)
 	var remote_color_html := str(player_data.get("color", "1677ff"))
+	var remote_factory_slot := int(player_data.get("factory_slot", -1))
 	online_peers[peer_id] = {
 		"username": remote_username,
 		"company": remote_company,
 		"color": remote_color_html,
+		"factory_slot": remote_factory_slot,
 	}
-	_spawn_remote_peer(peer_id, remote_username, remote_company, Color(remote_color_html))
+	_assign_factory_owner(peer_id, remote_factory_slot, remote_company, false)
+	_spawn_remote_peer(peer_id, remote_username, remote_company, Color(remote_color_html), remote_factory_slot)
 	if player_data.has("state") and player_data.state is Dictionary:
 		var state: Dictionary = player_data.state
 		_apply_remote_state(
@@ -2556,9 +2674,12 @@ func _receive_online_identity(player_data: Dictionary) -> void:
 func _clear_online_session() -> void:
 	for peer_id in remote_players.keys():
 		_remove_remote_peer(int(peer_id))
+	if online_peer_id != 0:
+		_release_factory_owner(online_peer_id)
 	online_peers.clear()
 	online_socket = null
 	online_peer_id = 0
+	local_factory_slot = -1
 	online_connected = false
 	online_mode = "menu"
 	_update_online_status()
@@ -2591,18 +2712,22 @@ func _update_online_status() -> void:
 		online_roster_label.text = "\n".join(roster_lines)
 		online_roster_panel.size.y = 42 + maxi(1, count) * 24
 
-func _spawn_remote_peer(peer_id: int, remote_username: String, remote_company: String, remote_color: Color) -> void:
+func _spawn_remote_peer(peer_id: int, remote_username: String, remote_company: String, remote_color: Color, factory_slot: int) -> void:
 	if peer_id == online_peer_id or remote_players.has(peer_id):
 		return
 	var remote := PlayerScript.new()
 	remote.name = "OnlinePlayer_%d" % peer_id
 	remote.configure_remote(remote_username, remote_company, remote_color)
-	remote.position = Vector3(-86 if peer_id % 2 == 0 else 86, 0.1, 52)
+	if factory_slot >= 0 and factory_slot < factory_slot_centers.size():
+		remote.position = factory_slot_centers[factory_slot] + Vector3(-10, 0.1, -48)
+	else:
+		remote.position = Vector3(-86 if peer_id % 2 == 0 else 86, 0.1, 52)
 	add_child(remote)
 	remote.remote_target_position = remote.global_position
 	remote_players[peer_id] = remote
 
 func _remove_remote_peer(peer_id: int) -> void:
+	_release_factory_owner(peer_id)
 	if remote_players.has(peer_id):
 		var remote: Node = remote_players[peer_id]
 		if is_instance_valid(remote):

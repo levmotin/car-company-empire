@@ -10,7 +10,7 @@ const { WebSocketServer, WebSocket } = require("ws");
 const scrypt = promisify(crypto.scrypt);
 const port = Number(process.env.PORT || 8080);
 const webRoot = path.join(__dirname, "web");
-const maxPlayers = 64;
+const maxPlayers = 16;
 const players = new Map();
 const sessions = new Map();
 const databaseUrl = process.env.DATABASE_URL || "";
@@ -425,11 +425,26 @@ function broadcast(value, excludedSocket = null) {
 function publicPlayer(player) {
   return {
     id: player.id,
+    factory_slot: player.factorySlot,
     username: player.username,
     company: player.company,
     color: player.color,
     state: player.state,
   };
+}
+
+function availableFactorySlot() {
+  const used = new Set(
+    [...players.values()]
+      .filter((player) => player.joined)
+      .map((player) => player.factorySlot),
+  );
+  for (let slot = 0; slot < maxPlayers; slot += 1) {
+    if (!used.has(slot)) {
+      return slot;
+    }
+  }
+  return -1;
 }
 
 function removePlayer(player) {
@@ -508,6 +523,7 @@ websocketServer.on("connection", (socket) => {
     id: nextPlayerId++,
     socket,
     joined: false,
+    factorySlot: -1,
     username: "",
     company: "",
     color: "1677ff",
@@ -543,6 +559,12 @@ websocketServer.on("connection", (socket) => {
       player.username = account.username;
       player.company = account.company;
       player.color = account.color;
+      player.factorySlot = availableFactorySlot();
+      if (player.factorySlot < 0) {
+        sendSocketJson(socket, { type: "world_full", error: "Every factory plot is occupied." });
+        socket.close(4002, "World full");
+        return;
+      }
       player.joined = true;
       clearTimeout(authenticationTimeout);
       const existingPlayers = [...players.values()]
@@ -551,6 +573,7 @@ websocketServer.on("connection", (socket) => {
       sendSocketJson(socket, {
         type: "welcome",
         id: player.id,
+        factory_slot: player.factorySlot,
         username: player.username,
         players: existingPlayers,
       });
