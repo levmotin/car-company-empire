@@ -8,14 +8,17 @@ func _run() -> void:
 	var game := packed.instantiate()
 	root.add_child(game)
 	await process_frame
-	var name_input := LineEdit.new()
-	name_input.text = "Test Motors"
-	game.call("_launch_company", name_input)
+	var username_input := LineEdit.new()
+	username_input.text = "TestDriver"
+	var company_input := LineEdit.new()
+	company_input.text = "Test Motors"
+	game.call("_launch_company", username_input, company_input)
 	await process_frame
 	var setup = game.get("company_setup")
 	var setup_closed: bool = not is_instance_valid(setup) or not setup.visible
 	var name_applied: bool = game.get("company_name") == "TEST MOTORS"
-	if setup_closed and name_applied:
+	var username_applied: bool = game.get("player_username") == "TestDriver"
+	if setup_closed and name_applied and username_applied:
 		print("LAUNCH_SMOKE_PASS")
 		game.queue_free()
 		await process_frame

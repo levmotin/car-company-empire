@@ -20,12 +20,14 @@ var remote_proxy := false
 var remote_target_position := Vector3.ZERO
 var remote_target_yaw := 0.0
 var remote_is_moving := false
+var remote_username := ""
 var remote_company := ""
 var remote_color := Color("#1677ff")
 
-func configure_remote(company: String, color: Color) -> void:
+func configure_remote(username: String, company: String, color: Color) -> void:
 	remote_proxy = true
 	enabled = false
+	remote_username = username
 	remote_company = company
 	remote_color = color
 
@@ -72,11 +74,11 @@ func _apply_remote_appearance() -> void:
 				remote_material.albedo_color = remote_color
 				child.material_override = remote_material
 	var nameplate := Label3D.new()
-	nameplate.text = remote_company
+	nameplate.text = remote_username
 	nameplate.position = Vector3(0, 2.35, 0)
-	nameplate.font_size = 34
-	nameplate.outline_size = 7
-	nameplate.modulate = remote_color.lightened(0.35)
+	nameplate.font_size = 38
+	nameplate.outline_size = 9
+	nameplate.modulate = Color.WHITE
 	nameplate.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	nameplate.no_depth_test = true
 	add_child(nameplate)

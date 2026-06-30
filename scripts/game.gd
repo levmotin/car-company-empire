@@ -11,6 +11,7 @@ var money := 25000
 var reputation := 0
 var company_level := 1
 var research := 0
+var player_username := "DRIVER"
 var company_name := "NOVA MOTORS"
 var brand_color := Color("#ff6333")
 var inventory := {"Chassis": 1, "Engine": 1, "Transmission": 1, "Wheels": 1, "Electronics": 0}
@@ -46,6 +47,8 @@ var city_model_cache := {}
 var factory_plots: Array[Node3D] = []
 var online_mode := "solo"
 var online_status_label: Label
+var online_roster_panel: PanelContainer
+var online_roster_label: Label
 var online_peers := {}
 var remote_players := {}
 var remote_vehicles := {}
@@ -1457,6 +1460,17 @@ func _build_ui() -> void:
 	online_status_label.add_theme_color_override("font_color", Color("#8fe7ff"))
 	online_status_label.text = "SOLO"
 	hud.add_child(online_status_label)
+	online_roster_panel = PanelContainer.new()
+	online_roster_panel.add_theme_stylebox_override("panel", style_panel)
+	online_roster_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	online_roster_panel.position = Vector2(-320, 70)
+	online_roster_panel.size = Vector2(294, 90)
+	online_roster_panel.visible = false
+	hud.add_child(online_roster_panel)
+	online_roster_label = Label.new()
+	online_roster_label.add_theme_font_size_override("font_size", 14)
+	online_roster_label.add_theme_color_override("font_color", Color("#d8efff"))
+	online_roster_panel.add_child(online_roster_label)
 	# Modal shell
 	modal = PanelContainer.new()
 	modal.add_theme_stylebox_override("panel", style_panel)
@@ -1480,11 +1494,11 @@ func _show_company_setup() -> void:
 	var card := PanelContainer.new()
 	card.add_theme_stylebox_override("panel", style_panel)
 	card.set_anchors_preset(Control.PRESET_CENTER)
-	card.position = Vector2(-350, -330)
-	card.size = Vector2(700, 660)
+	card.position = Vector2(-350, -370)
+	card.size = Vector2(700, 740)
 	company_setup.add_child(card)
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 16)
+	box.add_theme_constant_override("separation", 13)
 	card.add_child(box)
 	var kicker := Label.new()
 	kicker.text = "CAR COMPANY EMPIRE"
@@ -1500,6 +1514,16 @@ func _show_company_setup() -> void:
 	sub.add_theme_font_size_override("font_size", 16)
 	sub.add_theme_color_override("font_color", Color("#aebdca"))
 	box.add_child(sub)
+	var username_label := Label.new()
+	username_label.text = "PLAYER USERNAME"
+	username_label.add_theme_font_size_override("font_size", 13)
+	box.add_child(username_label)
+	var username_input := LineEdit.new()
+	username_input.text = "DRIVER"
+	username_input.placeholder_text = "Name shown above your character"
+	username_input.max_length = 18
+	username_input.add_theme_font_size_override("font_size", 20)
+	box.add_child(username_input)
 	var name_label := Label.new()
 	name_label.text = "COMPANY NAME"
 	name_label.add_theme_font_size_override("font_size", 13)
@@ -1551,33 +1575,31 @@ func _show_company_setup() -> void:
 	var solo := _ui_button("PLAY SOLO")
 	solo.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	solo.custom_minimum_size.y = 58
-	solo.pressed.connect(_launch_company.bind(name_input))
+	solo.pressed.connect(_launch_company.bind(username_input, name_input))
 	launch_row.add_child(solo)
 	var online := _ui_button("PLAY ONLINE")
 	online.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	online.custom_minimum_size.y = 58
-	online.pressed.connect(_launch_online.bind(name_input))
+	online.pressed.connect(_launch_online.bind(username_input, name_input))
 	launch_row.add_child(online)
 
-func _launch_company(name_input: LineEdit) -> void:
+func _launch_company(username_input: LineEdit, name_input: LineEdit) -> void:
 	online_mode = "solo"
-	_finish_company_launch(name_input)
+	_finish_company_launch(username_input, name_input)
 
-func _launch_online(name_input: LineEdit) -> void:
-	company_name = name_input.text.strip_edges().to_upper()
-	if company_name.is_empty():
-		company_name = "NOVA MOTORS"
+func _launch_online(username_input: LineEdit, name_input: LineEdit) -> void:
+	_apply_identity_inputs(username_input, name_input)
 	online_socket = WebSocketPeer.new()
 	var error := online_socket.connect_to_url(_online_server_url())
 	if error != OK:
 		online_mode = "solo"
-		_finish_company_launch(name_input)
+		_finish_company_launch(username_input, name_input)
 		_show_toast("Online world could not start (error %d). Playing solo." % error)
 		return
 	online_mode = "connecting"
 	online_connected = false
 	online_peer_id = 0
-	_finish_company_launch(name_input)
+	_finish_company_launch(username_input, name_input)
 	online_status_label.text = "ONLINE  •  CONNECTING…"
 	_show_toast("Joining the shared online world…")
 
@@ -1587,10 +1609,18 @@ func _online_server_url() -> String:
 			return argument.trim_prefix("--online-url=")
 	return ONLINE_SERVER_URL
 
-func _finish_company_launch(name_input: LineEdit) -> void:
+func _apply_identity_inputs(username_input: LineEdit, name_input: LineEdit) -> void:
+	player_username = username_input.text.strip_edges()
+	if player_username.is_empty():
+		player_username = "DRIVER"
+	player_username = player_username.left(18)
 	company_name = name_input.text.strip_edges().to_upper()
 	if company_name.is_empty():
 		company_name = "NOVA MOTORS"
+	company_name = company_name.left(32)
+
+func _finish_company_launch(username_input: LineEdit, name_input: LineEdit) -> void:
+	_apply_identity_inputs(username_input, name_input)
 	# Hide immediately so the click cannot be intercepted again while queue_free
 	# waits for the end of the frame.
 	if company_setup and is_instance_valid(company_setup):
@@ -2005,6 +2035,7 @@ func _update_online_multiplayer(delta: float) -> void:
 			online_connected = true
 			_send_online_message({
 				"type": "join",
+				"username": player_username,
 				"company": company_name,
 				"color": brand_color.to_html(),
 			})
@@ -2056,8 +2087,10 @@ func _handle_online_message(message: Dictionary) -> void:
 	match message_type:
 		"welcome":
 			online_peer_id = int(message.get("id", 0))
+			player_username = str(message.get("username", player_username))
 			online_mode = "online"
 			online_peers[online_peer_id] = {
+				"username": player_username,
 				"company": company_name,
 				"color": brand_color.to_html(),
 			}
@@ -2070,11 +2103,15 @@ func _handle_online_message(message: Dictionary) -> void:
 			_show_toast("Connected. You and your friends now share this world.")
 		"player_joined":
 			_receive_online_identity(message)
+			_show_toast("%s joined the online world." % str(message.get("username", "A player")))
 		"player_left":
 			var departed_id := int(message.get("id", 0))
+			var departed: Dictionary = online_peers.get(departed_id, {})
+			var departed_name := str(departed.get("username", "A player"))
 			online_peers.erase(departed_id)
 			_remove_remote_peer(departed_id)
 			_update_online_status()
+			_show_toast("%s left the online world." % departed_name)
 		"state":
 			var peer_id := int(message.get("id", 0))
 			if peer_id == 0 or peer_id == online_peer_id:
@@ -2096,13 +2133,15 @@ func _receive_online_identity(player_data: Dictionary) -> void:
 	var peer_id := int(player_data.get("id", 0))
 	if peer_id == 0 or peer_id == online_peer_id:
 		return
+	var remote_username := str(player_data.get("username", "DRIVER")).left(18)
 	var remote_company := str(player_data.get("company", "ONLINE MOTORS")).left(32)
 	var remote_color_html := str(player_data.get("color", "1677ff"))
 	online_peers[peer_id] = {
+		"username": remote_username,
 		"company": remote_company,
 		"color": remote_color_html,
 	}
-	_spawn_remote_peer(peer_id, remote_company, Color(remote_color_html))
+	_spawn_remote_peer(peer_id, remote_username, remote_company, Color(remote_color_html))
 	if player_data.has("state") and player_data.state is Dictionary:
 		var state: Dictionary = player_data.state
 		_apply_remote_state(
@@ -2133,19 +2172,35 @@ func _update_online_status() -> void:
 		return
 	if online_mode == "solo":
 		online_status_label.text = "SOLO"
+		online_roster_panel.visible = false
 		return
 	var count := online_peers.size()
 	if online_mode == "connecting":
 		online_status_label.text = "ONLINE  •  CONNECTING…"
+		online_roster_panel.visible = false
 	else:
 		online_status_label.text = "ONLINE  •  %d PLAYER%s" % [count, "" if count == 1 else "S"]
+		online_roster_panel.visible = true
+		var roster_lines := PackedStringArray(["PLAYERS ONLINE"])
+		var peer_ids := online_peers.keys()
+		peer_ids.sort()
+		for peer_id in peer_ids:
+			var identity: Dictionary = online_peers[peer_id]
+			var marker := "YOU" if int(peer_id) == online_peer_id else "•"
+			roster_lines.append("%s  %s  /  %s" % [
+				marker,
+				str(identity.get("username", "DRIVER")),
+				str(identity.get("company", "ONLINE MOTORS")),
+			])
+		online_roster_label.text = "\n".join(roster_lines)
+		online_roster_panel.size.y = 42 + maxi(1, count) * 24
 
-func _spawn_remote_peer(peer_id: int, remote_company: String, remote_color: Color) -> void:
+func _spawn_remote_peer(peer_id: int, remote_username: String, remote_company: String, remote_color: Color) -> void:
 	if peer_id == online_peer_id or remote_players.has(peer_id):
 		return
 	var remote := PlayerScript.new()
 	remote.name = "OnlinePlayer_%d" % peer_id
-	remote.configure_remote(remote_company, remote_color)
+	remote.configure_remote(remote_username, remote_company, remote_color)
 	remote.position = Vector3(-86 if peer_id % 2 == 0 else 86, 0.1, 52)
 	add_child(remote)
 	remote.remote_target_position = remote.global_position
@@ -2172,7 +2227,7 @@ func _apply_remote_state(peer_id: int, remote_position: Vector3, remote_yaw: flo
 	if driving:
 		var remote_vehicle: EmpireVehicle
 		if not remote_vehicles.has(peer_id) or not is_instance_valid(remote_vehicles[peer_id]):
-			var identity: Dictionary = online_peers.get(peer_id, {"company": "ONLINE", "color": "1677ff"})
+			var identity: Dictionary = online_peers.get(peer_id, {"username": "DRIVER", "company": "ONLINE", "color": "1677ff"})
 			remote_vehicle = VehicleScript.new()
 			remote_vehicle.name = "OnlineVehicle_%d" % peer_id
 			remote_vehicle.set_meta("online_remote", true)

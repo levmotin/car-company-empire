@@ -39,10 +39,42 @@ function broadcast(value, excludedSocket = null) {
 function publicPlayer(player) {
   return {
     id: player.id,
+    username: player.username,
     company: player.company,
     color: player.color,
     state: player.state,
   };
+}
+
+function uniqueUsername(requested, playerId) {
+  const cleaned = String(requested || "")
+    .replace(/[^a-zA-Z0-9_ -]/g, "")
+    .trim()
+    .slice(0, 18) || `DRIVER${playerId}`;
+  const used = new Set(
+    [...players.values()]
+      .filter((player) => player.joined && player.id !== playerId)
+      .map((player) => player.username.toLowerCase()),
+  );
+  if (!used.has(cleaned.toLowerCase())) {
+    return cleaned;
+  }
+  for (let suffix = 2; suffix < 1000; suffix += 1) {
+    const candidate = `${cleaned.slice(0, 14)}_${suffix}`;
+    if (!used.has(candidate.toLowerCase())) {
+      return candidate;
+    }
+  }
+  return `DRIVER${playerId}`;
+}
+
+function removePlayer(player) {
+  if (!players.delete(player.id)) {
+    return;
+  }
+  if (player.joined) {
+    broadcast({ type: "player_left", id: player.id });
+  }
 }
 
 const server = http.createServer((request, response) => {
@@ -105,9 +137,11 @@ websocketServer.on("connection", (socket) => {
     id: nextPlayerId++,
     socket,
     joined: false,
+    username: "",
     company: "ONLINE MOTORS",
     color: "1677ff",
     state: null,
+    alive: true,
   };
   players.set(player.id, player);
 
@@ -124,6 +158,7 @@ websocketServer.on("connection", (socket) => {
     }
 
     if (message.type === "join" && !player.joined) {
+      player.username = uniqueUsername(message.username, player.id);
       player.company = String(message.company || "ONLINE MOTORS").trim().slice(0, 32) || "ONLINE MOTORS";
       player.color = /^[0-9a-fA-F]{6,8}$/.test(String(message.color || ""))
         ? String(message.color)
@@ -132,7 +167,12 @@ websocketServer.on("connection", (socket) => {
       const existingPlayers = [...players.values()]
         .filter((other) => other.joined && other.id !== player.id)
         .map(publicPlayer);
-      sendJson(socket, { type: "welcome", id: player.id, players: existingPlayers });
+      sendJson(socket, {
+        type: "welcome",
+        id: player.id,
+        username: player.username,
+        players: existingPlayers,
+      });
       broadcast({ type: "player_joined", ...publicPlayer(player) }, socket);
       return;
     }
@@ -151,17 +191,34 @@ websocketServer.on("connection", (socket) => {
     }
   });
 
-  socket.on("close", () => {
-    players.delete(player.id);
-    if (player.joined) {
-      broadcast({ type: "player_left", id: player.id });
-    }
+  socket.on("pong", () => {
+    player.alive = true;
   });
 
+  socket.on("close", () => removePlayer(player));
+
   socket.on("error", () => {
-    socket.close();
+    socket.terminate();
   });
 });
+
+const presenceInterval = setInterval(() => {
+  for (const player of players.values()) {
+    if (player.socket.readyState !== WebSocket.OPEN) {
+      player.socket.terminate();
+      removePlayer(player);
+      continue;
+    }
+    if (!player.alive) {
+      player.socket.terminate();
+      removePlayer(player);
+      continue;
+    }
+    player.alive = false;
+    player.socket.ping();
+  }
+}, 15000);
+presenceInterval.unref();
 
 server.listen(port, "0.0.0.0", () => {
   console.log(`Car Company Empire online server listening on port ${port}`);

@@ -19,7 +19,10 @@ Choose **Play Online** to enter the shared live world. Browser and desktop
 players connect through the hosted WebSocket service, so friends can see one
 another walking and driving without port forwarding. Each player currently
 keeps independent business progression while company owners and their driven
-cars are synchronized in real time.
+cars are synchronized in real time. Player usernames appear above characters
+and in the online roster. Closing the game removes that player from every
+connected client; the server also cleans up interrupted connections with
+heartbeat checks.
 
 Choose **Play Solo** when you do not want to join the shared world.
 
