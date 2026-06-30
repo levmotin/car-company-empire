@@ -1575,7 +1575,7 @@ func _show_settings_screen() -> void:
 func _show_auth_screen(sign_in: bool) -> void:
 	_clear_startup_screen()
 	company_setup = _startup_backdrop()
-	var card_size := Vector2(680, 540 if sign_in else 650)
+	var card_size := Vector2(680, 575 if sign_in else 685)
 	var card := _startup_card(card_size)
 	company_setup.add_child(card)
 	var box := VBoxContainer.new()
@@ -1595,6 +1595,12 @@ func _show_auth_screen(sign_in: bool) -> void:
 	mode_row.add_child(sign_up_tab)
 	var username_input := _auth_input(box, "USERNAME", "Your player username", false, 18)
 	var password_input := _auth_input(box, "PASSWORD", "At least 6 characters", true, 72)
+	var show_password := CheckButton.new()
+	show_password.text = "SHOW PASSWORD"
+	show_password.add_theme_font_size_override("font_size", 13)
+	show_password.add_theme_color_override("font_color", Color("#b8ccdc"))
+	show_password.toggled.connect(_toggle_password_visibility.bind(password_input))
+	box.add_child(show_password)
 	var company_input: LineEdit
 	if not sign_in:
 		company_input = _auth_input(box, "COMPANY NAME", "Your automotive company", false, 32)
@@ -1680,6 +1686,9 @@ func _auth_input(box: VBoxContainer, label_text: String, placeholder: String, se
 	input.custom_minimum_size.y = 44
 	box.add_child(input)
 	return input
+
+func _toggle_password_visibility(visible_password: bool, password_input: LineEdit) -> void:
+	password_input.secret = not visible_password
 
 func _submit_sign_in(username_input: LineEdit, password_input: LineEdit, button: Button, error_label: Label) -> void:
 	_submit_auth("/signin", {
