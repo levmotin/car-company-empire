@@ -5,6 +5,7 @@
 build/
 exports/
 node_modules/
+.data/
 
 # macOS
 .DS_Store

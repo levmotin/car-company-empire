@@ -8,24 +8,42 @@ func _run() -> void:
 	var game := packed.instantiate()
 	root.add_child(game)
 	await process_frame
-	var username_input := LineEdit.new()
-	username_input.text = "TestDriver"
-	var company_input := LineEdit.new()
-	company_input.text = "Test Motors"
-	game.call("_launch_company", username_input, company_input)
+	var menu = game.get("company_setup")
+	var menu_visible: bool = is_instance_valid(menu) and menu.visible
+	var minimap_removed: bool = game.get("hud").find_child("*CITY NAVIGATION*", true, false) == null
+	game.call("_apply_account", {
+		"username": "TestDriver",
+		"company": "Test Motors",
+		"color": "1677ff",
+		"progress": {
+			"money": 54321,
+			"reputation": 10,
+			"company_level": 2,
+			"research": 1,
+			"inventory": {"Chassis": 2, "Engine": 3, "Transmission": 4, "Wheels": 5, "Electronics": 6},
+			"cars": [{"name": "TEST GT", "quality": 4, "color": "ff6333"}],
+			"total_built": 2,
+			"total_sales": 1,
+			"objective_stage": 3,
+			"player_position": {"x": 90, "y": 0.1, "z": 55},
+		},
+	})
+	game.call("_finish_online_launch")
 	await process_frame
 	var setup = game.get("company_setup")
 	var setup_closed: bool = not is_instance_valid(setup) or not setup.visible
 	var name_applied: bool = game.get("company_name") == "TEST MOTORS"
 	var username_applied: bool = game.get("player_username") == "TestDriver"
-	if setup_closed and name_applied and username_applied:
+	var money_loaded: bool = game.get("money") == 54321
+	var cars_loaded: bool = game.get("manufactured_vehicles").size() == 1
+	if menu_visible and minimap_removed and setup_closed and name_applied and username_applied and money_loaded and cars_loaded:
 		print("LAUNCH_SMOKE_PASS")
 		game.queue_free()
 		await process_frame
 		await process_frame
 		quit(0)
 	else:
-		push_error("Company launch did not close setup or apply the company name.")
+		push_error("Online account launch did not restore the saved company.")
 		game.queue_free()
 		await process_frame
 		quit(1)

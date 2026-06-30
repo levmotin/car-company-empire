@@ -10,21 +10,21 @@ Open the project in Godot 4.7 and run it, or launch from the project folder:
 /Applications/Godot.app/Contents/MacOS/Godot --path .
 ```
 
-Choose a company name and brand color, enter the starter car, visit suppliers,
-manufacture vehicles at the factory, and sell them at the dealership.
+Create an account with a username, company name, password, and brand color.
+Then enter the starter car, visit suppliers, manufacture vehicles at the
+factory, and sell them at the dealership.
 
-## Online multiplayer
+## Online accounts and multiplayer
 
-Choose **Play Online** to enter the shared live world. Browser and desktop
-players connect through the hosted WebSocket service, so friends can see one
-another walking and driving without port forwarding. Each player currently
-keeps independent business progression while company owners and their driven
-cars are synchronized in real time. Player usernames appear above characters
-and in the online roster. Closing the game removes that player from every
-connected client; the server also cleans up interrupted connections with
-heartbeat checks.
+The game is online-only. Select **Play**, then sign in or create an account.
+Browser and desktop players connect through the hosted WebSocket service, so
+friends share one world and see one another walking and driving. Usernames
+appear above characters and in the online roster.
 
-Choose **Play Solo** when you do not want to join the shared world.
+Account progress is stored in PostgreSQL and autosaved: money, reputation,
+company level, research, parts inventory, manufactured cars, sales, objectives,
+and world position. Closing the game removes the live character from the world
+without deleting account progress.
 
 ## Controls
 
@@ -36,7 +36,7 @@ Choose **Play Solo** when you do not want to join the shared world.
 - `Esc` — release or capture the mouse
 
 The city, buildings, roads, cars, UI, dealerships, factory, suppliers, and test
-track are assembled locally and require no network connection.
+track are assembled by the Godot client after the online account connects.
 
 ## Asset credits
 

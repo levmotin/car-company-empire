@@ -10,11 +10,25 @@ func _run() -> void:
 	root.add_child(game)
 	await process_frame
 
-	var username_input := LineEdit.new()
-	username_input.text = "ClientDriver" if is_client else "HostDriver"
-	var company_input := LineEdit.new()
-	company_input.text = "CLIENT MOTORS" if is_client else "HOST MOTORS"
-	game.call("_launch_online", username_input, company_input)
+	var auth_token := ""
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--auth-token="):
+			auth_token = argument.trim_prefix("--auth-token=")
+	if auth_token.is_empty():
+		push_error("Online smoke test requires --auth-token.")
+		quit(1)
+		return
+	var username := "ClientDriver" if is_client else "HostDriver"
+	var company := "CLIENT MOTORS" if is_client else "HOST MOTORS"
+	game.call("_apply_account", {
+		"username": username,
+		"company": company,
+		"color": "1677ff",
+		"progress": {},
+	})
+	game.set("auth_token", auth_token)
+	game.call("_show_loading_screen", "TEST CONNECTING")
+	game.call("_connect_online_world")
 	var local_player: EmpirePlayer = game.get("player")
 	local_player.global_position = Vector3(-24.0 if is_client else 24.0, 0.1, 52.0)
 

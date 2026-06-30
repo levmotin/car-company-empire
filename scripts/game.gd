@@ -2,9 +2,10 @@ extends Node3D
 
 const PlayerScript = preload("res://scripts/player.gd")
 const VehicleScript = preload("res://scripts/vehicle.gd")
-const MinimapScript = preload("res://scripts/minimap.gd")
 const ONLINE_SERVER_URL := "wss://car-company-empire-online.onrender.com/multiplayer"
+const ACCOUNT_API_BASE_URL := "https://car-company-empire-online.onrender.com/api"
 const NETWORK_SEND_INTERVAL := 0.05
+const AUTOSAVE_INTERVAL := 10.0
 
 var player: EmpirePlayer
 var current_vehicle: EmpireVehicle
@@ -35,8 +36,8 @@ var toast: Label
 var modal: PanelContainer
 var modal_body: VBoxContainer
 var company_setup: Control
-var minimap_arrow: Label
-var minimap: Control
+var loading_screen: Control
+var loading_label: Label
 var toast_tween: Tween
 var time_of_day := 9.2
 var sun: DirectionalLight3D
@@ -47,7 +48,7 @@ var style_panel: StyleBoxFlat
 var style_button: StyleBoxFlat
 var city_model_cache := {}
 var factory_plots: Array[Node3D] = []
-var online_mode := "solo"
+var online_mode := "menu"
 var online_status_label: Label
 var online_roster_panel: PanelContainer
 var online_roster_label: Label
@@ -58,6 +59,13 @@ var network_send_accumulator := 0.0
 var online_socket: WebSocketPeer
 var online_peer_id := 0
 var online_connected := false
+var auth_token := ""
+var auth_request: HTTPRequest
+var save_request: HTTPRequest
+var save_in_flight := false
+var progress_dirty := false
+var autosave_accumulator := 0.0
+var game_started := false
 
 func _ready() -> void:
 	_setup_styles()
@@ -66,7 +74,15 @@ func _ready() -> void:
 	_spawn_player()
 	_spawn_starter_car()
 	_build_ui()
-	_show_company_setup()
+	player.set_active(false)
+	hud.visible = false
+	auth_request = HTTPRequest.new()
+	auth_request.request_completed.connect(_on_auth_request_completed)
+	add_child(auth_request)
+	save_request = HTTPRequest.new()
+	save_request.request_completed.connect(_on_save_request_completed)
+	add_child(save_request)
+	_show_main_menu()
 
 func _setup_styles() -> void:
 	style_panel = StyleBoxFlat.new()
@@ -1429,31 +1445,6 @@ func _build_ui() -> void:
 	controls.add_theme_font_size_override("font_size", 13)
 	controls.add_theme_color_override("font_color", Color(0.86, 0.92, 0.98, 0.75))
 	hud.add_child(controls)
-	# Live world minimap
-	var minimap_panel := PanelContainer.new()
-	minimap_panel.add_theme_stylebox_override("panel", style_panel)
-	minimap_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	minimap_panel.position = Vector2(-270, -455)
-	minimap_panel.size = Vector2(250, 270)
-	hud.add_child(minimap_panel)
-	var minimap_box := VBoxContainer.new()
-	minimap_box.add_theme_constant_override("separation", 6)
-	minimap_panel.add_child(minimap_box)
-	var minimap_title := Label.new()
-	minimap_title.text = "CITY NAVIGATION"
-	minimap_title.add_theme_font_size_override("font_size", 13)
-	minimap_title.add_theme_color_override("font_color", Color("#8fe7ff"))
-	minimap_box.add_child(minimap_title)
-	minimap = MinimapScript.new()
-	minimap.custom_minimum_size = Vector2(214, 208)
-	minimap.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	minimap.configure(self)
-	minimap_box.add_child(minimap)
-	var minimap_legend := Label.new()
-	minimap_legend.text = "● BUSINESS   ● SUPPLIER   ▲ YOU"
-	minimap_legend.add_theme_font_size_override("font_size", 10)
-	minimap_legend.add_theme_color_override("font_color", Color(0.78, 0.88, 0.94, 0.78))
-	minimap_box.add_child(minimap_legend)
 	# Speedometer
 	speed_panel = PanelContainer.new()
 	speed_panel.add_theme_stylebox_override("panel", style_panel)
@@ -1485,7 +1476,7 @@ func _build_ui() -> void:
 	online_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	online_status_label.add_theme_font_size_override("font_size", 15)
 	online_status_label.add_theme_color_override("font_color", Color("#8fe7ff"))
-	online_status_label.text = "SOLO"
+	online_status_label.text = "ONLINE  •  SIGN IN REQUIRED"
 	hud.add_child(online_status_label)
 	online_roster_panel = PanelContainer.new()
 	online_roster_panel.add_theme_stylebox_override("panel", style_panel)
@@ -1511,157 +1502,437 @@ func _build_ui() -> void:
 	modal.add_child(modal_body)
 	_refresh_hud()
 
-func _show_company_setup() -> void:
-	# Setup is the only startup state that intentionally uses a visible cursor.
+func _show_main_menu() -> void:
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
-	company_setup = ColorRect.new()
-	company_setup.color = Color(0.015, 0.035, 0.06, 0.96)
-	company_setup.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	ui.add_child(company_setup)
+	_clear_startup_screen()
+	company_setup = _startup_backdrop()
+	var card := _startup_card(Vector2(600, 500))
+	company_setup.add_child(card)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 18)
+	card.add_child(box)
+	_add_startup_heading(box, "CAR COMPANY EMPIRE", "BUILD. DRIVE. DOMINATE.")
+	var sub := Label.new()
+	sub.text = "A persistent online automotive world.\nBuild your company alongside real players."
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.add_theme_font_size_override("font_size", 17)
+	sub.add_theme_color_override("font_color", Color("#aebdca"))
+	box.add_child(sub)
+	var spacer := Control.new()
+	spacer.custom_minimum_size.y = 22
+	box.add_child(spacer)
+	var play := _ui_button("PLAY")
+	play.custom_minimum_size.y = 66
+	play.pressed.connect(_show_auth_screen.bind(true))
+	box.add_child(play)
+	var settings := _ui_button("SETTINGS")
+	settings.custom_minimum_size.y = 54
+	settings.pressed.connect(_show_settings_screen)
+	box.add_child(settings)
+	var online_only := Label.new()
+	online_only.text = "ONLINE ACCOUNT REQUIRED  •  PROGRESS SAVES AUTOMATICALLY"
+	online_only.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	online_only.add_theme_font_size_override("font_size", 12)
+	online_only.add_theme_color_override("font_color", Color("#63d5ff"))
+	box.add_child(online_only)
+
+func _show_settings_screen() -> void:
+	_clear_startup_screen()
+	company_setup = _startup_backdrop()
+	var card := _startup_card(Vector2(600, 520))
+	company_setup.add_child(card)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 18)
+	card.add_child(box)
+	_add_startup_heading(box, "SETTINGS", "GAME & CONTROLS")
+	var controls := Label.new()
+	controls.text = "WASD  —  MOVE / DRIVE\nSHIFT  —  SPRINT\nSPACE  —  JUMP / HANDBRAKE\nE  —  INTERACT\nESC  —  RELEASE MOUSE"
+	controls.add_theme_font_size_override("font_size", 18)
+	controls.add_theme_color_override("font_color", Color("#d7e6f2"))
+	box.add_child(controls)
+	var fullscreen := _ui_button("TOGGLE FULLSCREEN")
+	fullscreen.custom_minimum_size.y = 52
+	fullscreen.pressed.connect(_toggle_fullscreen)
+	box.add_child(fullscreen)
+	var back := _ui_button("BACK")
+	back.custom_minimum_size.y = 52
+	back.pressed.connect(_show_main_menu)
+	box.add_child(back)
+
+func _show_auth_screen(sign_in: bool) -> void:
+	_clear_startup_screen()
+	company_setup = _startup_backdrop()
+	var card_size := Vector2(680, 590 if sign_in else 690)
+	var card := _startup_card(card_size)
+	company_setup.add_child(card)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 11)
+	card.add_child(box)
+	_add_startup_heading(box, "PLAY ONLINE", "SIGN IN" if sign_in else "CREATE ACCOUNT")
+	var mode_row := HBoxContainer.new()
+	mode_row.add_theme_constant_override("separation", 10)
+	box.add_child(mode_row)
+	var sign_in_tab := _ui_button("SIGN IN")
+	sign_in_tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sign_in_tab.pressed.connect(_show_auth_screen.bind(true))
+	mode_row.add_child(sign_in_tab)
+	var sign_up_tab := _ui_button("SIGN UP")
+	sign_up_tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	sign_up_tab.pressed.connect(_show_auth_screen.bind(false))
+	mode_row.add_child(sign_up_tab)
+	var username_input := _auth_input(box, "USERNAME", "Your player username", false, 18)
+	var password_input := _auth_input(box, "PASSWORD", "At least 6 characters", true, 72)
+	var company_input: LineEdit
+	if not sign_in:
+		company_input = _auth_input(box, "COMPANY NAME", "Your automotive company", false, 32)
+		var color_label := Label.new()
+		color_label.text = "COMPANY COLOR"
+		color_label.add_theme_font_size_override("font_size", 12)
+		box.add_child(color_label)
+		var colors := HBoxContainer.new()
+		colors.add_theme_constant_override("separation", 10)
+		box.add_child(colors)
+		var palette := [Color("#ff6333"), Color("#1677ff"), Color("#24c78a"), Color("#a95cff"), Color("#f2c94c")]
+		for index in range(palette.size()):
+			var color: Color = palette[index]
+			var color_button := Button.new()
+			color_button.custom_minimum_size = Vector2(72, 44)
+			color_button.focus_mode = Control.FOCUS_NONE
+			color_button.add_theme_font_size_override("font_size", 22)
+			color_button.add_theme_color_override("font_color", Color.WHITE)
+			var color_style := StyleBoxFlat.new()
+			color_style.bg_color = color
+			color_style.set_corner_radius_all(8)
+			color_button.add_theme_stylebox_override("normal", color_style)
+			color_button.add_theme_stylebox_override("hover", color_style)
+			color_button.add_theme_stylebox_override("pressed", color_style)
+			colors.add_child(color_button)
+			color_button.pressed.connect(_select_brand_color.bind(color, color_button, colors))
+			if index == 0:
+				_select_brand_color(color, color_button, colors)
+	var error_label := Label.new()
+	error_label.name = "AuthError"
+	error_label.custom_minimum_size.y = 40
+	error_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	error_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	error_label.add_theme_font_size_override("font_size", 14)
+	error_label.add_theme_color_override("font_color", Color("#ff8d8d"))
+	box.add_child(error_label)
+	var submit := _ui_button("SIGN IN & PLAY" if sign_in else "CREATE ACCOUNT & PLAY")
+	submit.custom_minimum_size.y = 58
+	if sign_in:
+		submit.pressed.connect(_submit_sign_in.bind(username_input, password_input, submit, error_label))
+	else:
+		submit.pressed.connect(_submit_sign_up.bind(username_input, password_input, company_input, submit, error_label))
+	box.add_child(submit)
+	var back := _ui_button("BACK TO MENU")
+	back.pressed.connect(_show_main_menu)
+	box.add_child(back)
+
+func _startup_backdrop() -> ColorRect:
+	var backdrop := ColorRect.new()
+	backdrop.color = Color(0.008, 0.02, 0.04, 0.96)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	ui.add_child(backdrop)
+	return backdrop
+
+func _startup_card(card_size: Vector2) -> PanelContainer:
 	var card := PanelContainer.new()
 	card.add_theme_stylebox_override("panel", style_panel)
 	card.set_anchors_preset(Control.PRESET_CENTER)
-	card.position = Vector2(-350, -370)
-	card.size = Vector2(700, 740)
-	company_setup.add_child(card)
-	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 13)
-	card.add_child(box)
+	card.position = -card_size * 0.5
+	card.size = card_size
+	return card
+
+func _add_startup_heading(box: VBoxContainer, kicker_text: String, title_text: String) -> void:
 	var kicker := Label.new()
-	kicker.text = "CAR COMPANY EMPIRE"
-	kicker.add_theme_font_size_override("font_size", 15)
+	kicker.text = kicker_text
+	kicker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	kicker.add_theme_font_size_override("font_size", 14)
 	kicker.add_theme_color_override("font_color", Color("#63d5ff"))
 	box.add_child(kicker)
 	var title := Label.new()
-	title.text = "Build a brand. Own the road."
+	title.text = title_text
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", 36)
 	box.add_child(title)
-	var sub := Label.new()
-	sub.text = "Start with a small factory, source components, manufacture original cars,\nand grow into the world's most valuable automotive company."
-	sub.add_theme_font_size_override("font_size", 16)
-	sub.add_theme_color_override("font_color", Color("#aebdca"))
-	box.add_child(sub)
-	var username_label := Label.new()
-	username_label.text = "PLAYER USERNAME"
-	username_label.add_theme_font_size_override("font_size", 13)
-	box.add_child(username_label)
-	var username_input := LineEdit.new()
-	username_input.text = "DRIVER"
-	username_input.placeholder_text = "Name shown above your character"
-	username_input.max_length = 18
-	username_input.add_theme_font_size_override("font_size", 20)
-	box.add_child(username_input)
-	var name_label := Label.new()
-	name_label.text = "COMPANY NAME"
-	name_label.add_theme_font_size_override("font_size", 13)
-	box.add_child(name_label)
-	var name_input := LineEdit.new()
-	name_input.text = "NOVA MOTORS"
-	name_input.placeholder_text = "Enter company name"
-	name_input.add_theme_font_size_override("font_size", 20)
-	box.add_child(name_input)
-	var color_label := Label.new()
-	color_label.text = "BRAND COLOR"
-	color_label.add_theme_font_size_override("font_size", 13)
-	box.add_child(color_label)
-	var colors := HBoxContainer.new()
-	colors.add_theme_constant_override("separation", 12)
-	box.add_child(colors)
-	var palette := [Color("#ff6333"), Color("#1677ff"), Color("#24c78a"), Color("#a95cff"), Color("#f2c94c")]
-	for index in range(palette.size()):
-		var c: Color = palette[index]
-		var button := Button.new()
-		button.text = ""
-		button.custom_minimum_size = Vector2(72, 46)
-		button.focus_mode = Control.FOCUS_NONE
-		button.add_theme_font_size_override("font_size", 24)
-		button.add_theme_color_override("font_color", Color.WHITE)
-		var color_style := StyleBoxFlat.new()
-		color_style.bg_color = c
-		color_style.set_corner_radius_all(8)
-		button.add_theme_stylebox_override("normal", color_style)
-		button.add_theme_stylebox_override("hover", color_style)
-		button.add_theme_stylebox_override("pressed", color_style)
-		colors.add_child(button)
-		button.pressed.connect(_select_brand_color.bind(c, button, colors))
-		if index == 0:
-			_select_brand_color(c, button, colors)
-	var features := Label.new()
-	features.text = "STARTER PACKAGE\n$25,000 operating capital  •  Small factory  •  Nova C1 prototype\nBasic chassis, engine, transmission and wheel inventory"
-	features.add_theme_font_size_override("font_size", 15)
-	features.add_theme_color_override("font_color", Color("#d1dce5"))
-	box.add_child(features)
-	var online_label := Label.new()
-	online_label.text = "LIVE ONLINE WORLD  •  PLAY TOGETHER"
-	online_label.add_theme_font_size_override("font_size", 13)
-	online_label.add_theme_color_override("font_color", Color("#63d5ff"))
-	box.add_child(online_label)
-	var launch_row := HBoxContainer.new()
-	launch_row.add_theme_constant_override("separation", 10)
-	box.add_child(launch_row)
-	var solo := _ui_button("PLAY SOLO")
-	solo.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	solo.custom_minimum_size.y = 58
-	solo.pressed.connect(_launch_company.bind(username_input, name_input))
-	launch_row.add_child(solo)
-	var online := _ui_button("PLAY ONLINE")
-	online.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	online.custom_minimum_size.y = 58
-	online.pressed.connect(_launch_online.bind(username_input, name_input))
-	launch_row.add_child(online)
 
-func _launch_company(username_input: LineEdit, name_input: LineEdit) -> void:
-	online_mode = "solo"
-	_finish_company_launch(username_input, name_input)
+func _auth_input(box: VBoxContainer, label_text: String, placeholder: String, secret: bool, limit: int) -> LineEdit:
+	var label := Label.new()
+	label.text = label_text
+	label.add_theme_font_size_override("font_size", 12)
+	box.add_child(label)
+	var input := LineEdit.new()
+	input.placeholder_text = placeholder
+	input.max_length = limit
+	input.secret = secret
+	input.add_theme_font_size_override("font_size", 19)
+	input.custom_minimum_size.y = 44
+	box.add_child(input)
+	return input
 
-func _launch_online(username_input: LineEdit, name_input: LineEdit) -> void:
-	_apply_identity_inputs(username_input, name_input)
+func _submit_sign_in(username_input: LineEdit, password_input: LineEdit, button: Button, error_label: Label) -> void:
+	_submit_auth("/signin", {
+		"username": username_input.text.strip_edges(),
+		"password": password_input.text,
+	}, button, error_label)
+
+func _submit_sign_up(username_input: LineEdit, password_input: LineEdit, company_input: LineEdit, button: Button, error_label: Label) -> void:
+	_submit_auth("/signup", {
+		"username": username_input.text.strip_edges(),
+		"password": password_input.text,
+		"company": company_input.text.strip_edges(),
+		"color": brand_color.to_html(false),
+	}, button, error_label)
+
+func _submit_auth(endpoint: String, body: Dictionary, button: Button, error_label: Label) -> void:
+	if auth_request.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+		return
+	button.disabled = true
+	button.text = "CONTACTING SERVER…"
+	error_label.text = ""
+	auth_request.set_meta("button", button)
+	auth_request.set_meta("error_label", error_label)
+	var headers := PackedStringArray(["Content-Type: application/json"])
+	var error := auth_request.request(_account_api_url() + endpoint, headers, HTTPClient.METHOD_POST, JSON.stringify(body))
+	if error != OK:
+		button.disabled = false
+		button.text = "TRY AGAIN"
+		error_label.text = "Could not contact the account server."
+
+func _on_auth_request_completed(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	var button := auth_request.get_meta("button") as Button
+	var error_label := auth_request.get_meta("error_label") as Label
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	if response_code < 200 or response_code >= 300 or not parsed is Dictionary:
+		if is_instance_valid(button):
+			button.disabled = false
+			button.text = "TRY AGAIN"
+		if is_instance_valid(error_label):
+			error_label.text = str(parsed.get("error", "Account server unavailable.")) if parsed is Dictionary else "Account server unavailable."
+		return
+	auth_token = str(parsed.get("token", ""))
+	var account = parsed.get("account", {})
+	if auth_token.is_empty() or not account is Dictionary:
+		if is_instance_valid(error_label):
+			error_label.text = "The account server returned an invalid response."
+		return
+	_apply_account(account)
+	_show_loading_screen("SIGNING IN…")
+	_connect_online_world()
+
+func _account_api_url() -> String:
+	for argument in OS.get_cmdline_user_args():
+		if argument.begins_with("--account-url="):
+			return argument.trim_prefix("--account-url=")
+	return ACCOUNT_API_BASE_URL
+
+func _connect_online_world() -> void:
 	online_socket = WebSocketPeer.new()
 	var error := online_socket.connect_to_url(_online_server_url())
 	if error != OK:
-		online_mode = "solo"
-		_finish_company_launch(username_input, name_input)
-		_show_toast("Online world could not start (error %d). Playing solo." % error)
+		_show_connection_failure("The online world is unavailable (error %d)." % error)
 		return
 	online_mode = "connecting"
 	online_connected = false
 	online_peer_id = 0
-	_finish_company_launch(username_input, name_input)
-	online_status_label.text = "ONLINE  •  CONNECTING…"
-	_show_toast("Joining the shared online world…")
+	if loading_label:
+		loading_label.text = "JOINING ONLINE WORLD…"
+
+func _show_loading_screen(message: String) -> void:
+	_clear_startup_screen()
+	loading_screen = _startup_backdrop()
+	company_setup = loading_screen
+	var card := _startup_card(Vector2(580, 300))
+	loading_screen.add_child(card)
+	var box := VBoxContainer.new()
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 18)
+	card.add_child(box)
+	var title := Label.new()
+	title.text = "CAR COMPANY EMPIRE"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", Color("#63d5ff"))
+	box.add_child(title)
+	loading_label = Label.new()
+	loading_label.text = message
+	loading_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	loading_label.add_theme_font_size_override("font_size", 28)
+	box.add_child(loading_label)
+	var hint := Label.new()
+	hint.text = "Waking the server and restoring your company.\nThis can take about a minute."
+	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 15)
+	hint.add_theme_color_override("font_color", Color("#aebdca"))
+	box.add_child(hint)
+
+func _show_connection_failure(message: String) -> void:
+	online_mode = "menu"
+	_clear_startup_screen()
+	company_setup = _startup_backdrop()
+	var card := _startup_card(Vector2(600, 400))
+	company_setup.add_child(card)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 20)
+	card.add_child(box)
+	_add_startup_heading(box, "CONNECTION FAILED", "ONLINE REQUIRED")
+	var error := Label.new()
+	error.text = message + "\nThere is no offline mode."
+	error.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	error.add_theme_font_size_override("font_size", 17)
+	error.add_theme_color_override("font_color", Color("#ff9a9a"))
+	box.add_child(error)
+	var retry := _ui_button("RETRY")
+	retry.pressed.connect(func():
+		_show_loading_screen("RECONNECTING…")
+		_connect_online_world()
+	)
+	box.add_child(retry)
+	var back := _ui_button("BACK TO SIGN IN")
+	back.pressed.connect(_show_auth_screen.bind(true))
+	box.add_child(back)
+
+func _finish_online_launch() -> void:
+	game_started = true
+	hud.visible = true
+	_clear_startup_screen()
+	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	player.set_active(true)
+	starter_vehicle.set_body_color(brand_color)
+	for plot in factory_plots:
+		if bool(plot.get_meta("is_local_owner", false)):
+			plot.set_meta("owner_company", company_name)
+	_refresh_hud()
+	_show_toast("Connected. Your company progress is saved online.")
+
+func _clear_startup_screen() -> void:
+	if company_setup and is_instance_valid(company_setup):
+		company_setup.queue_free()
+	company_setup = null
+	loading_screen = null
+	loading_label = null
+
+func _toggle_fullscreen() -> void:
+	if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+	else:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+
+func _apply_account(account: Dictionary) -> void:
+	player_username = str(account.get("username", "DRIVER")).left(18)
+	company_name = str(account.get("company", "NOVA MOTORS")).to_upper().left(32)
+	var color_text := str(account.get("color", "ff6333"))
+	brand_color = Color("#" + color_text.trim_prefix("#"))
+	var progress = account.get("progress", {})
+	if not progress is Dictionary:
+		progress = {}
+	money = int(progress.get("money", 25000))
+	reputation = int(progress.get("reputation", 0))
+	company_level = int(progress.get("company_level", 1))
+	research = int(progress.get("research", 0))
+	total_built = int(progress.get("total_built", 0))
+	total_sales = int(progress.get("total_sales", 0))
+	objective_stage = int(progress.get("objective_stage", 0))
+	var loaded_inventory = progress.get("inventory", {})
+	if loaded_inventory is Dictionary:
+		for part in inventory.keys():
+			inventory[part] = int(loaded_inventory.get(part, inventory[part]))
+	var loaded_position = progress.get("player_position", {})
+	if loaded_position is Dictionary:
+		player.position = Vector3(
+			float(loaded_position.get("x", 86.0)),
+			float(loaded_position.get("y", 0.1)),
+			float(loaded_position.get("z", 52.0))
+		)
+	for vehicle in manufactured_vehicles:
+		if is_instance_valid(vehicle):
+			vehicle.queue_free()
+	manufactured_vehicles.clear()
+	var cars = progress.get("cars", [])
+	if cars is Array:
+		for car_data in cars:
+			if car_data is Dictionary:
+				_spawn_saved_vehicle(car_data)
+	manufactured = manufactured_vehicles.size()
+	starter_vehicle.brand_name = company_name.left(8) + " C1"
+	starter_vehicle.set_body_color(brand_color)
+	progress_dirty = false
+	autosave_accumulator = 0.0
+
+func _spawn_saved_vehicle(car_data: Dictionary) -> void:
+	var car := VehicleScript.new()
+	var color_text := str(car_data.get("color", brand_color.to_html(false)))
+	var car_color := Color("#" + color_text.trim_prefix("#"))
+	var model_name := str(car_data.get("name", company_name.left(4) + " MODEL")).left(24)
+	var quality := maxi(1, int(car_data.get("quality", 1)))
+	car.setup(self, car_color, model_name, quality)
+	var parking_index := manufactured_vehicles.size()
+	car.position = Vector3(60 + (parking_index % 3) * 20.0, 0.1, 51 + (parking_index / 3) * 10.0)
+	car.rotation.y = PI
+	add_child(car)
+	manufactured_vehicles.append(car)
+
+func _progress_payload() -> Dictionary:
+	var cars: Array[Dictionary] = []
+	for vehicle in manufactured_vehicles:
+		if is_instance_valid(vehicle):
+			cars.append({
+				"name": vehicle.brand_name,
+				"quality": vehicle.quality,
+				"color": vehicle.body_color.to_html(false),
+			})
+	var saved_position := player.global_position
+	if current_vehicle:
+		saved_position = current_vehicle.global_position
+	return {
+		"money": money,
+		"reputation": reputation,
+		"company_level": company_level,
+		"research": research,
+		"inventory": inventory.duplicate(true),
+		"cars": cars,
+		"total_built": total_built,
+		"total_sales": total_sales,
+		"objective_stage": objective_stage,
+		"player_position": {
+			"x": saved_position.x,
+			"y": saved_position.y,
+			"z": saved_position.z,
+		},
+	}
+
+func _save_progress() -> void:
+	if auth_token.is_empty() or save_in_flight or not game_started:
+		return
+	save_in_flight = true
+	progress_dirty = false
+	autosave_accumulator = 0.0
+	var headers := PackedStringArray([
+		"Content-Type: application/json",
+		"Authorization: Bearer " + auth_token,
+	])
+	var error := save_request.request(
+		_account_api_url() + "/progress",
+		headers,
+		HTTPClient.METHOD_PUT,
+		JSON.stringify({"progress": _progress_payload()})
+	)
+	if error != OK:
+		save_in_flight = false
+		progress_dirty = true
+
+func _on_save_request_completed(_result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray) -> void:
+	save_in_flight = false
+	if response_code < 200 or response_code >= 300:
+		progress_dirty = true
 
 func _online_server_url() -> String:
 	for argument in OS.get_cmdline_user_args():
 		if argument.begins_with("--online-url="):
 			return argument.trim_prefix("--online-url=")
 	return ONLINE_SERVER_URL
-
-func _apply_identity_inputs(username_input: LineEdit, name_input: LineEdit) -> void:
-	player_username = username_input.text.strip_edges()
-	if player_username.is_empty():
-		player_username = "DRIVER"
-	player_username = player_username.left(18)
-	company_name = name_input.text.strip_edges().to_upper()
-	if company_name.is_empty():
-		company_name = "NOVA MOTORS"
-	company_name = company_name.left(32)
-
-func _finish_company_launch(username_input: LineEdit, name_input: LineEdit) -> void:
-	_apply_identity_inputs(username_input, name_input)
-	# Hide immediately so the click cannot be intercepted again while queue_free
-	# waits for the end of the frame.
-	if company_setup and is_instance_valid(company_setup):
-		company_setup.visible = false
-		company_setup.queue_free()
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
-	player.enabled = true
-	starter_vehicle.set_body_color(brand_color)
-	for plot in factory_plots:
-		if bool(plot.get_meta("is_local_owner", false)):
-			plot.set_meta("owner_company", company_name)
-	_refresh_hud()
-	if online_mode == "solo":
-		_show_toast("Welcome, CEO. Your factory is operational.")
 
 func _select_brand_color(color: Color, selected_button: Button, group: HBoxContainer) -> void:
 	brand_color = color
@@ -1687,6 +1958,10 @@ func _process(delta: float) -> void:
 	time_of_day += delta * 0.025
 	sun.rotation_degrees.x = -48.0 + sin(time_of_day * 0.25) * 10.0
 	_update_online_multiplayer(delta)
+	if game_started:
+		autosave_accumulator += delta
+		if autosave_accumulator >= AUTOSAVE_INTERVAL or (progress_dirty and autosave_accumulator >= 2.0):
+			_save_progress()
 	if company_setup and is_instance_valid(company_setup):
 		return
 	_update_nearest()
@@ -2025,6 +2300,13 @@ func _refresh_hud() -> void:
 			var row = top_panel.get_child(0)
 			if row and row.get_child_count() > 0:
 				row.get_child(0).text = "CCE  /  " + company_name
+	if game_started:
+		progress_dirty = true
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_WINDOW_FOCUS_OUT and game_started:
+		progress_dirty = true
+		_save_progress()
 
 func _format_money(value: int) -> String:
 	var text := str(value)
@@ -2053,7 +2335,7 @@ func update_vehicle_hud(kph: float, vehicle_name: String) -> void:
 	speed_label.text = "%03d\nKM/H\n%s" % [int(kph), vehicle_name]
 
 func _update_online_multiplayer(delta: float) -> void:
-	if online_mode == "solo" or online_socket == null:
+	if online_socket == null:
 		return
 	online_socket.poll()
 	var ready_state := online_socket.get_ready_state()
@@ -2062,9 +2344,7 @@ func _update_online_multiplayer(delta: float) -> void:
 			online_connected = true
 			_send_online_message({
 				"type": "join",
-				"username": player_username,
-				"company": company_name,
-				"color": brand_color.to_html(),
+				"token": auth_token,
 			})
 		while online_socket.get_available_packet_count() > 0:
 			var packet := online_socket.get_packet()
@@ -2072,12 +2352,11 @@ func _update_online_multiplayer(delta: float) -> void:
 			if parsed is Dictionary:
 				_handle_online_message(parsed)
 	elif ready_state == WebSocketPeer.STATE_CLOSED:
-		var was_online := online_connected
 		_clear_online_session()
-		if was_online:
-			_show_toast("Connection lost. You are now playing solo.")
-		else:
-			_show_toast("Could not reach the online world. Playing solo.")
+		game_started = false
+		hud.visible = false
+		player.set_active(false)
+		_show_connection_failure("Connection to the shared world was lost.")
 		return
 	else:
 		return
@@ -2127,7 +2406,13 @@ func _handle_online_message(message: Dictionary) -> void:
 					if player_data is Dictionary:
 						_receive_online_identity(player_data)
 			_update_online_status()
-			_show_toast("Connected. You and your friends now share this world.")
+			if not game_started:
+				_finish_online_launch()
+			else:
+				_show_toast("Reconnected to the shared online world.")
+		"auth_error":
+			auth_token = ""
+			_show_connection_failure(str(message.get("error", "Session expired. Sign in again.")))
 		"player_joined":
 			_receive_online_identity(message)
 			_show_toast("%s joined the online world." % str(message.get("username", "A player")))
@@ -2191,14 +2476,14 @@ func _clear_online_session() -> void:
 	online_socket = null
 	online_peer_id = 0
 	online_connected = false
-	online_mode = "solo"
+	online_mode = "menu"
 	_update_online_status()
 
 func _update_online_status() -> void:
 	if not online_status_label:
 		return
-	if online_mode == "solo":
-		online_status_label.text = "SOLO"
+	if online_mode == "menu":
+		online_status_label.text = "OFFLINE"
 		online_roster_panel.visible = false
 		return
 	var count := online_peers.size()
