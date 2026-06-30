@@ -2,6 +2,7 @@ extends Node3D
 
 const PlayerScript = preload("res://scripts/player.gd")
 const VehicleScript = preload("res://scripts/vehicle.gd")
+const MinimapScript = preload("res://scripts/minimap.gd")
 const ONLINE_SERVER_URL := "wss://car-company-empire-online.onrender.com/multiplayer"
 const NETWORK_SEND_INTERVAL := 0.05
 
@@ -35,6 +36,7 @@ var modal: PanelContainer
 var modal_body: VBoxContainer
 var company_setup: Control
 var minimap_arrow: Label
+var minimap: Control
 var toast_tween: Tween
 var time_of_day := 9.2
 var sun: DirectionalLight3D
@@ -1427,6 +1429,31 @@ func _build_ui() -> void:
 	controls.add_theme_font_size_override("font_size", 13)
 	controls.add_theme_color_override("font_color", Color(0.86, 0.92, 0.98, 0.75))
 	hud.add_child(controls)
+	# Live world minimap
+	var minimap_panel := PanelContainer.new()
+	minimap_panel.add_theme_stylebox_override("panel", style_panel)
+	minimap_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	minimap_panel.position = Vector2(-270, -455)
+	minimap_panel.size = Vector2(250, 270)
+	hud.add_child(minimap_panel)
+	var minimap_box := VBoxContainer.new()
+	minimap_box.add_theme_constant_override("separation", 6)
+	minimap_panel.add_child(minimap_box)
+	var minimap_title := Label.new()
+	minimap_title.text = "CITY NAVIGATION"
+	minimap_title.add_theme_font_size_override("font_size", 13)
+	minimap_title.add_theme_color_override("font_color", Color("#8fe7ff"))
+	minimap_box.add_child(minimap_title)
+	minimap = MinimapScript.new()
+	minimap.custom_minimum_size = Vector2(214, 208)
+	minimap.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	minimap.configure(self)
+	minimap_box.add_child(minimap)
+	var minimap_legend := Label.new()
+	minimap_legend.text = "● BUSINESS   ● SUPPLIER   ▲ YOU"
+	minimap_legend.add_theme_font_size_override("font_size", 10)
+	minimap_legend.add_theme_color_override("font_color", Color(0.78, 0.88, 0.94, 0.78))
+	minimap_box.add_child(minimap_legend)
 	# Speedometer
 	speed_panel = PanelContainer.new()
 	speed_panel.add_theme_stylebox_override("panel", style_panel)
