@@ -38,8 +38,8 @@ func _run() -> void:
 	var factory_centers: Array[Vector3] = game.get("factory_slot_centers")
 	var factory_plots: Array[Node3D] = game.get("factory_plots")
 	var unique_factories_ready: bool = (
-		factory_centers.size() == 16
-		and factory_plots.size() == 16
+		factory_centers.size() == 12
+		and factory_plots.size() == 12
 		and game.get("player").global_position.distance_to(factory_centers[0] + Vector3(-10, 0.1, -48)) < 0.1
 		and int(factory_plots[0].get_meta("owner_peer_id")) == 101
 		and int(factory_plots[1].get_meta("owner_peer_id")) == 202

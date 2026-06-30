@@ -20,7 +20,7 @@ The game is online-only. Select **Play**, then sign in or create an account.
 Browser and desktop players connect through the hosted WebSocket service, so
 friends share one world and see one another walking and driving. Usernames
 appear above characters and in the online roster. The server assigns every
-connected company a different factory in the 16-plot online company district;
+connected company a different factory in the 12-plot Empire industrial district;
 players and their cars spawn at their own plot.
 
 Account progress is stored in PostgreSQL and autosaved: money, reputation,

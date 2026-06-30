@@ -543,20 +543,57 @@ func _build_clean_downtown() -> void:
 	_sign(Vector3(-80, 8, -49), "DOWNTOWN", Color("#6edcff"))
 
 func _build_online_factory_park() -> void:
-	# Sixteen distinct plots match the server's player limit. The road grid keeps
-	# every company accessible without placing players on top of one another.
-	_clean_asphalt(Vector3(480, -0.03, 0), Vector3(440, 0.025, 18))
+	# Twelve distinct plots match the server's player limit. This industrial
+	# district extends the city's existing eastbound streets instead of sitting
+	# in a disconnected field.
+	_clean_asphalt(Vector3(415, -0.03, 0), Vector3(400, 0.025, 18))
 	for road_z in [-240.0, -120.0, 0.0, 120.0, 240.0]:
-		_clean_asphalt(Vector3(490, -0.025, road_z), Vector3(430, 0.025, 14))
-	for road_x in [290.0, 390.0, 490.0, 590.0, 690.0]:
+		_clean_asphalt(Vector3(420, -0.025, road_z), Vector3(380, 0.025, 14))
+	for road_x in [240.0, 360.0, 480.0, 600.0]:
 		_clean_asphalt(Vector3(road_x, -0.024, 0), Vector3(14, 0.025, 500))
-	_sign(Vector3(490, 11, -270), "ONLINE COMPANY DISTRICT", Color("#73ddff"))
+	_sign(Vector3(420, 11, -270), "EMPIRE INDUSTRIAL DISTRICT", Color("#73ddff"))
 	for row in range(4):
-		for column in range(4):
-			var slot := row * 4 + column
-			var center := Vector3(340.0 + column * 100.0, 0, -180.0 + row * 120.0)
+		for column in range(3):
+			var slot := row * 3 + column
+			var center := Vector3(300.0 + column * 120.0, 0, -180.0 + row * 120.0)
 			factory_slot_centers.append(center)
 			_build_factory_slot(center, slot)
+	_build_factory_district_city_blocks()
+
+func _build_factory_district_city_blocks() -> void:
+	var northern_models := ["building-b", "building-f", "building-i"]
+	var southern_models := ["building-c", "building-g", "building-l"]
+	for index in range(3):
+		var x := 300.0 + index * 120.0
+		_clean_lot(Vector3(x, 0, -320), Vector3(92, 0, 74), Color("#7da96b"))
+		_spawn_city_model(
+			"res://assets/city/kenney/" + northern_models[index] + ".glb",
+			Vector3(x, 0, -320),
+			18.0,
+			0.0,
+			Vector3(26, 31, 24)
+		)
+		_clean_lot(Vector3(x, 0, 320), Vector3(92, 0, 74), Color("#7da96b"))
+		_spawn_city_model(
+			"res://assets/city/kenney/" + southern_models[index] + ".glb",
+			Vector3(x, 0, 320),
+			18.0,
+			PI,
+			Vector3(26, 31, 24)
+		)
+	for row in range(4):
+		var z := -180.0 + row * 120.0
+		_clean_lot(Vector3(660, 0, z), Vector3(76, 0, 92), Color("#7da96b"))
+		_spawn_city_model(
+			"res://assets/city/kenney/low-detail-building-" + ["d", "h", "k", "n"][row] + ".glb",
+			Vector3(660, 0, z),
+			20.0,
+			-PI * 0.5,
+			Vector3(25, 29, 25)
+		)
+	for lamp_z in [-240.0, -120.0, 0.0, 120.0, 240.0]:
+		_clean_street_lamp(Vector3(225, 0, lamp_z + 7))
+		_clean_street_lamp(Vector3(615, 0, lamp_z - 7))
 
 func _build_factory_slot(center: Vector3, slot: int) -> void:
 	_register_factory_plot(center, 0, "AVAILABLE FACTORY", false)
