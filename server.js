@@ -230,6 +230,22 @@ async function updateAccountProgress(usernameKey, progress) {
   return account;
 }
 
+async function deleteAccount(usernameKey) {
+  if (pool) {
+    const result = await pool.query(
+      "DELETE FROM accounts WHERE username_key = $1 RETURNING username_key",
+      [usernameKey],
+    );
+    return result.rowCount > 0;
+  }
+  if (!localAccounts[usernameKey]) {
+    return false;
+  }
+  delete localAccounts[usernameKey];
+  saveLocalAccounts();
+  return true;
+}
+
 function publicAccount(account) {
   return {
     username: account.username,
@@ -259,7 +275,7 @@ function sendJsonResponse(response, status, value) {
     "Content-Type": "application/json; charset=utf-8",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Authorization, Content-Type",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
     "Cache-Control": "no-store",
   });
   response.end(JSON.stringify(value));
@@ -357,6 +373,26 @@ async function handleApi(request, response, requestUrl) {
         return;
       }
       sendJsonResponse(response, 200, { saved: true });
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/account" && request.method === "DELETE") {
+      const usernameKey = accountKeyFromRequest(request);
+      if (!usernameKey) {
+        sendJsonResponse(response, 401, { error: "Sign in required." });
+        return;
+      }
+      const deleted = await deleteAccount(usernameKey);
+      if (!deleted) {
+        sendJsonResponse(response, 404, { error: "Account not found." });
+        return;
+      }
+      for (const [token, session] of sessions) {
+        if (session.usernameKey === usernameKey) {
+          sessions.delete(token);
+        }
+      }
+      sendJsonResponse(response, 200, { deleted: true });
       return;
     }
 

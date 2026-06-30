@@ -62,6 +62,7 @@ var online_connected := false
 var auth_token := ""
 var auth_request: HTTPRequest
 var save_request: HTTPRequest
+var delete_request: HTTPRequest
 var save_in_flight := false
 var progress_dirty := false
 var autosave_accumulator := 0.0
@@ -82,6 +83,9 @@ func _ready() -> void:
 	save_request = HTTPRequest.new()
 	save_request.request_completed.connect(_on_save_request_completed)
 	add_child(save_request)
+	delete_request = HTTPRequest.new()
+	delete_request.request_completed.connect(_on_delete_request_completed)
+	add_child(delete_request)
 	_show_main_menu()
 
 func _setup_styles() -> void:
@@ -1489,6 +1493,12 @@ func _build_ui() -> void:
 	online_roster_label.add_theme_font_size_override("font_size", 14)
 	online_roster_label.add_theme_color_override("font_color", Color("#d8efff"))
 	online_roster_panel.add_child(online_roster_label)
+	var account_button := _ui_button("ACCOUNT")
+	account_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	account_button.position = Vector2(-148, 170)
+	account_button.size = Vector2(122, 42)
+	account_button.pressed.connect(_open_account_settings)
+	hud.add_child(account_button)
 	# Modal shell
 	modal = PanelContainer.new()
 	modal.add_theme_stylebox_override("panel", style_panel)
@@ -1927,6 +1937,67 @@ func _on_save_request_completed(_result: int, response_code: int, _headers: Pack
 	save_in_flight = false
 	if response_code < 200 or response_code >= 300:
 		progress_dirty = true
+
+func _open_account_settings() -> void:
+	panel_open = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	player.enabled = false
+	modal.visible = true
+	for child in modal_body.get_children():
+		child.queue_free()
+	var title := Label.new()
+	title.text = "ACCOUNT"
+	title.add_theme_font_size_override("font_size", 29)
+	modal_body.add_child(title)
+	var identity := Label.new()
+	identity.text = "%s\n%s\n\nProgress saves automatically to your online account." % [player_username, company_name]
+	identity.add_theme_font_size_override("font_size", 17)
+	identity.add_theme_color_override("font_color", Color("#d8e6f2"))
+	modal_body.add_child(identity)
+	var delete_button := _ui_button("DELETE ACCOUNT")
+	delete_button.add_theme_color_override("font_color", Color("#ffb0b0"))
+	delete_button.pressed.connect(_account_delete_pressed.bind(delete_button))
+	modal_body.add_child(delete_button)
+	var close := _ui_button("CLOSE")
+	close.pressed.connect(_close_modal)
+	modal_body.add_child(close)
+
+func _account_delete_pressed(button: Button) -> void:
+	if bool(button.get_meta("delete_armed", false)):
+		_delete_account(button)
+		return
+	button.set_meta("delete_armed", true)
+	button.text = "CONFIRM: DELETE ACCOUNT PERMANENTLY"
+
+func _delete_account(button: Button) -> void:
+	if delete_request.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+		return
+	button.disabled = true
+	button.text = "DELETING ACCOUNT…"
+	var headers := PackedStringArray(["Authorization: Bearer " + auth_token])
+	var error := delete_request.request(
+		_account_api_url() + "/account",
+		headers,
+		HTTPClient.METHOD_DELETE
+	)
+	if error != OK:
+		button.disabled = false
+		button.text = "DELETE FAILED — TRY AGAIN"
+
+func _on_delete_request_completed(_result: int, response_code: int, _headers: PackedStringArray, _body: PackedByteArray) -> void:
+	if response_code < 200 or response_code >= 300:
+		_show_toast("Account deletion failed. Try again.")
+		return
+	game_started = false
+	auth_token = ""
+	modal.visible = false
+	panel_open = false
+	hud.visible = false
+	player.set_active(false)
+	if online_socket:
+		online_socket.close()
+	_clear_online_session()
+	_show_main_menu()
 
 func _online_server_url() -> String:
 	for argument in OS.get_cmdline_user_args():
