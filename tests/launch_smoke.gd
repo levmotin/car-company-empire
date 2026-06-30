@@ -28,6 +28,10 @@ func _run() -> void:
 			"player_position": {"x": 90, "y": 0.1, "z": 55},
 		},
 	})
+	game.set("auth_token", "test-token")
+	game.call("_show_main_menu")
+	await process_frame
+	var authenticated_menu_ready: bool = not game.get("game_started") and not game.get("hud").visible
 	game.call("_finish_online_launch")
 	await process_frame
 	var setup = game.get("company_setup")
@@ -36,7 +40,7 @@ func _run() -> void:
 	var username_applied: bool = game.get("player_username") == "TestDriver"
 	var money_loaded: bool = game.get("money") == 54321
 	var cars_loaded: bool = game.get("manufactured_vehicles").size() == 1
-	if menu_visible and minimap_removed and setup_closed and name_applied and username_applied and money_loaded and cars_loaded:
+	if menu_visible and authenticated_menu_ready and minimap_removed and setup_closed and name_applied and username_applied and money_loaded and cars_loaded:
 		print("LAUNCH_SMOKE_PASS")
 		game.queue_free()
 		await process_frame

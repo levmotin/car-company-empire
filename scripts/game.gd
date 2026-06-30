@@ -86,7 +86,7 @@ func _ready() -> void:
 	delete_request = HTTPRequest.new()
 	delete_request.request_completed.connect(_on_delete_request_completed)
 	add_child(delete_request)
-	_show_main_menu()
+	_show_auth_screen(true)
 
 func _setup_styles() -> void:
 	style_panel = StyleBoxFlat.new()
@@ -1513,6 +1513,9 @@ func _build_ui() -> void:
 	_refresh_hud()
 
 func _show_main_menu() -> void:
+	if auth_token.is_empty():
+		_show_auth_screen(true)
+		return
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	_clear_startup_screen()
 	company_setup = _startup_backdrop()
@@ -1523,7 +1526,7 @@ func _show_main_menu() -> void:
 	card.add_child(box)
 	_add_startup_heading(box, "CAR COMPANY EMPIRE", "BUILD. DRIVE. DOMINATE.")
 	var sub := Label.new()
-	sub.text = "A persistent online automotive world.\nBuild your company alongside real players."
+	sub.text = "SIGNED IN AS  %s  /  %s\nBuild your company alongside real players." % [player_username, company_name]
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	sub.add_theme_font_size_override("font_size", 17)
 	sub.add_theme_color_override("font_color", Color("#aebdca"))
@@ -1533,7 +1536,7 @@ func _show_main_menu() -> void:
 	box.add_child(spacer)
 	var play := _ui_button("PLAY")
 	play.custom_minimum_size.y = 66
-	play.pressed.connect(_show_auth_screen.bind(true))
+	play.pressed.connect(_begin_online_play)
 	box.add_child(play)
 	var settings := _ui_button("SETTINGS")
 	settings.custom_minimum_size.y = 54
@@ -1572,13 +1575,13 @@ func _show_settings_screen() -> void:
 func _show_auth_screen(sign_in: bool) -> void:
 	_clear_startup_screen()
 	company_setup = _startup_backdrop()
-	var card_size := Vector2(680, 590 if sign_in else 690)
+	var card_size := Vector2(680, 540 if sign_in else 650)
 	var card := _startup_card(card_size)
 	company_setup.add_child(card)
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 11)
 	card.add_child(box)
-	_add_startup_heading(box, "PLAY ONLINE", "SIGN IN" if sign_in else "CREATE ACCOUNT")
+	_add_startup_heading(box, "CAR COMPANY EMPIRE", "SIGN IN" if sign_in else "CREATE ACCOUNT")
 	var mode_row := HBoxContainer.new()
 	mode_row.add_theme_constant_override("separation", 10)
 	box.add_child(mode_row)
@@ -1628,16 +1631,13 @@ func _show_auth_screen(sign_in: bool) -> void:
 	error_label.add_theme_font_size_override("font_size", 14)
 	error_label.add_theme_color_override("font_color", Color("#ff8d8d"))
 	box.add_child(error_label)
-	var submit := _ui_button("SIGN IN & PLAY" if sign_in else "CREATE ACCOUNT & PLAY")
+	var submit := _ui_button("SIGN IN" if sign_in else "CREATE ACCOUNT")
 	submit.custom_minimum_size.y = 58
 	if sign_in:
 		submit.pressed.connect(_submit_sign_in.bind(username_input, password_input, submit, error_label))
 	else:
 		submit.pressed.connect(_submit_sign_up.bind(username_input, password_input, company_input, submit, error_label))
 	box.add_child(submit)
-	var back := _ui_button("BACK TO MENU")
-	back.pressed.connect(_show_main_menu)
-	box.add_child(back)
 
 func _startup_backdrop() -> ColorRect:
 	var backdrop := ColorRect.new()
@@ -1728,7 +1728,10 @@ func _on_auth_request_completed(_result: int, response_code: int, _headers: Pack
 			error_label.text = "The account server returned an invalid response."
 		return
 	_apply_account(account)
-	_show_loading_screen("SIGNING IN…")
+	_show_main_menu()
+
+func _begin_online_play() -> void:
+	_show_loading_screen("JOINING ONLINE WORLD…")
 	_connect_online_world()
 
 func _account_api_url() -> String:
@@ -1801,7 +1804,8 @@ func _show_connection_failure(message: String) -> void:
 	)
 	box.add_child(retry)
 	var back := _ui_button("BACK TO SIGN IN")
-	back.pressed.connect(_show_auth_screen.bind(true))
+	back.text = "BACK TO MAIN MENU"
+	back.pressed.connect(_show_main_menu)
 	box.add_child(back)
 
 func _finish_online_launch() -> void:
@@ -1997,7 +2001,7 @@ func _on_delete_request_completed(_result: int, response_code: int, _headers: Pa
 	if online_socket:
 		online_socket.close()
 	_clear_online_session()
-	_show_main_menu()
+	_show_auth_screen(true)
 
 func _online_server_url() -> String:
 	for argument in OS.get_cmdline_user_args():
