@@ -91,6 +91,7 @@ func _ready() -> void:
 	delete_request.request_completed.connect(_on_delete_request_completed)
 	add_child(delete_request)
 	_show_auth_screen(true)
+	call_deferred("_consume_google_login_code")
 
 func _setup_styles() -> void:
 	style_panel = StyleBoxFlat.new()
@@ -1723,7 +1724,7 @@ func _show_settings_screen() -> void:
 func _show_auth_screen(sign_in: bool) -> void:
 	_clear_startup_screen()
 	company_setup = _startup_backdrop()
-	var card_size := Vector2(680, 575 if sign_in else 685)
+	var card_size := Vector2(680, 650 if sign_in else 710)
 	var card := _startup_card(card_size)
 	company_setup.add_child(card)
 	var box := VBoxContainer.new()
@@ -1741,6 +1742,16 @@ func _show_auth_screen(sign_in: bool) -> void:
 	sign_up_tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	sign_up_tab.pressed.connect(_show_auth_screen.bind(false))
 	mode_row.add_child(sign_up_tab)
+	var google_button := _ui_button("CONTINUE WITH GOOGLE")
+	google_button.custom_minimum_size.y = 52
+	google_button.pressed.connect(_start_google_sign_in)
+	box.add_child(google_button)
+	var password_separator := Label.new()
+	password_separator.text = "OR USE USERNAME AND PASSWORD"
+	password_separator.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	password_separator.add_theme_font_size_override("font_size", 11)
+	password_separator.add_theme_color_override("font_color", Color("#7f9aaf"))
+	box.add_child(password_separator)
 	var username_input := _auth_input(box, "USERNAME", "Your player username", false, 18)
 	var password_input := _auth_input(box, "PASSWORD", "At least 6 characters", true, 72)
 	var show_password := CheckButton.new()
@@ -1866,6 +1877,36 @@ func _submit_auth(endpoint: String, body: Dictionary, button: Button, error_labe
 		button.disabled = false
 		button.text = "TRY AGAIN"
 		error_label.text = "Could not contact the account server."
+
+func _start_google_sign_in() -> void:
+	var oauth_url := _account_api_url().trim_suffix("/api") + "/auth/google"
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval("window.location.href = " + JSON.stringify(oauth_url))
+	else:
+		OS.shell_open(oauth_url)
+
+func _consume_google_login_code() -> void:
+	if not OS.has_feature("web"):
+		return
+	var code = JavaScriptBridge.eval("new URLSearchParams(window.location.search).get('login_code') || ''")
+	var login_code := str(code)
+	if login_code.is_empty():
+		return
+	JavaScriptBridge.eval("window.history.replaceState({}, document.title, window.location.pathname)")
+	_show_loading_screen("COMPLETING GOOGLE SIGN-IN…")
+	if auth_request.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+		return
+	auth_request.set_meta("button", null)
+	auth_request.set_meta("error_label", null)
+	var headers := PackedStringArray(["Content-Type: application/json"])
+	var error := auth_request.request(
+		_account_api_url() + "/oauth/exchange",
+		headers,
+		HTTPClient.METHOD_POST,
+		JSON.stringify({"code": login_code})
+	)
+	if error != OK:
+		_show_auth_screen(true)
 
 func _on_auth_request_completed(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
 	var button := auth_request.get_meta("button") as Button

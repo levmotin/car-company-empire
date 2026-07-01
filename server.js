@@ -15,6 +15,13 @@ const players = new Map();
 const sessions = new Map();
 const databaseUrl = process.env.DATABASE_URL || "";
 const { Pool } = databaseUrl ? require("pg") : { Pool: null };
+const googleClientId = process.env.GOOGLE_CLIENT_ID || "";
+const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET || "";
+const publicServerUrl = process.env.PUBLIC_SERVER_URL || "https://car-company-empire-online.onrender.com";
+const publicGameUrl = process.env.PUBLIC_GAME_URL || "https://car-company-empire.onrender.com";
+const googleRedirectUri = `${publicServerUrl}/auth/google/callback`;
+const oauthStates = new Map();
+const oauthCodes = new Map();
 const localDataPath = path.join(__dirname, ".data", "accounts.json");
 const pool = databaseUrl
   ? new Pool({ connectionString: databaseUrl, ssl: { rejectUnauthorized: false } })
@@ -152,6 +159,13 @@ async function initializeStore() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    await pool.query("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS google_sub TEXT");
+    await pool.query("ALTER TABLE accounts ADD COLUMN IF NOT EXISTS email TEXT");
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS accounts_google_sub_unique
+      ON accounts (google_sub)
+      WHERE google_sub IS NOT NULL
+    `);
     return;
   }
   fs.mkdirSync(path.dirname(localDataPath), { recursive: true });
@@ -178,6 +192,17 @@ async function findAccount(username) {
   return localAccounts[usernameKey] || null;
 }
 
+async function findGoogleAccount(googleSub) {
+  if (pool) {
+    const result = await pool.query(
+      "SELECT * FROM accounts WHERE google_sub = $1 LIMIT 1",
+      [googleSub],
+    );
+    return result.rows[0] || null;
+  }
+  return Object.values(localAccounts).find((account) => account.google_sub === googleSub) || null;
+}
+
 async function createAccount(username, passwordHash, company, color) {
   const record = {
     username,
@@ -199,6 +224,45 @@ async function createAccount(username, passwordHash, company, color) {
         record.password_hash,
         record.company,
         record.color,
+        JSON.stringify(record.progress),
+      ],
+    );
+    return result.rows[0];
+  }
+  localAccounts[record.username_key] = record;
+  saveLocalAccounts();
+  return record;
+}
+
+async function createGoogleAccount(profile) {
+  const username = cleanUsername(profile.name || String(profile.email || "").split("@")[0]) || "GOOGLE DRIVER";
+  const companyBase = username.replace(/[^a-zA-Z0-9]/g, "").slice(0, 20) || "GOOGLE";
+  const usernameKey = `g_${crypto.createHash("sha256").update(profile.sub).digest("hex").slice(0, 16)}`;
+  const color = crypto.createHash("sha256").update(profile.sub).digest("hex").slice(0, 6);
+  const record = {
+    username,
+    username_key: usernameKey,
+    password_hash: "google-oauth",
+    company: `${companyBase} MOTORS`.slice(0, 32),
+    color,
+    google_sub: profile.sub,
+    email: String(profile.email || "").slice(0, 254),
+    progress: cloneStarterProgress(),
+  };
+  if (pool) {
+    const result = await pool.query(
+      `INSERT INTO accounts
+        (username, username_key, password_hash, company, color, google_sub, email, progress)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+       RETURNING *`,
+      [
+        record.username,
+        record.username_key,
+        record.password_hash,
+        record.company,
+        record.color,
+        record.google_sub,
+        record.email,
         JSON.stringify(record.progress),
       ],
     );
@@ -305,6 +369,106 @@ function readJsonBody(request) {
   });
 }
 
+function sendHtml(response, status, title, message) {
+  response.writeHead(status, {
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  response.end(`<!doctype html>
+<html><head><meta charset="utf-8"><title>${title}</title></head>
+<body style="font-family:system-ui;background:#07111d;color:#eef6ff;padding:48px">
+<h1>${title}</h1><p>${message}</p>
+<p><a style="color:#65d5ff" href="${publicGameUrl}">Return to Car Company Empire</a></p>
+</body></html>`);
+}
+
+async function handleGoogleOAuth(request, response, requestUrl) {
+  if (!googleClientId || !googleClientSecret) {
+    sendHtml(
+      response,
+      503,
+      "Google Sign-In is not configured",
+      "The game owner must add GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Render.",
+    );
+    return;
+  }
+
+  if (requestUrl.pathname === "/auth/google") {
+    const state = crypto.randomBytes(24).toString("hex");
+    oauthStates.set(state, Date.now());
+    const authorizationUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    authorizationUrl.searchParams.set("client_id", googleClientId);
+    authorizationUrl.searchParams.set("redirect_uri", googleRedirectUri);
+    authorizationUrl.searchParams.set("response_type", "code");
+    authorizationUrl.searchParams.set("scope", "openid email profile");
+    authorizationUrl.searchParams.set("state", state);
+    authorizationUrl.searchParams.set("prompt", "select_account");
+    response.writeHead(302, { Location: authorizationUrl.toString(), "Cache-Control": "no-store" });
+    response.end();
+    return;
+  }
+
+  const state = String(requestUrl.searchParams.get("state") || "");
+  const issuedAt = oauthStates.get(state);
+  oauthStates.delete(state);
+  if (!issuedAt || Date.now() - issuedAt > 10 * 60 * 1000) {
+    sendHtml(response, 400, "Google Sign-In failed", "The sign-in request expired. Please try again.");
+    return;
+  }
+  const authorizationCode = String(requestUrl.searchParams.get("code") || "");
+  if (!authorizationCode) {
+    sendHtml(response, 400, "Google Sign-In canceled", "Google did not return an authorization code.");
+    return;
+  }
+
+  try {
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code: authorizationCode,
+        client_id: googleClientId,
+        client_secret: googleClientSecret,
+        redirect_uri: googleRedirectUri,
+        grant_type: "authorization_code",
+      }),
+    });
+    const tokens = await tokenResponse.json();
+    if (!tokenResponse.ok || !tokens.id_token) {
+      throw new Error("Google token exchange failed.");
+    }
+    const validationResponse = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tokens.id_token)}`,
+    );
+    const profile = await validationResponse.json();
+    if (
+      !validationResponse.ok
+      || profile.aud !== googleClientId
+      || profile.iss !== "https://accounts.google.com"
+      || String(profile.email_verified) !== "true"
+      || !profile.sub
+    ) {
+      throw new Error("Google identity validation failed.");
+    }
+    let account = await findGoogleAccount(profile.sub);
+    if (!account) {
+      account = await createGoogleAccount(profile);
+    }
+    const exchangeCode = crypto.randomBytes(32).toString("hex");
+    oauthCodes.set(exchangeCode, {
+      usernameKey: account.username_key,
+      createdAt: Date.now(),
+    });
+    const gameUrl = new URL(publicGameUrl);
+    gameUrl.searchParams.set("login_code", exchangeCode);
+    response.writeHead(302, { Location: gameUrl.toString(), "Cache-Control": "no-store" });
+    response.end();
+  } catch (error) {
+    console.error("Google OAuth error:", error);
+    sendHtml(response, 500, "Google Sign-In failed", "Google could not complete sign-in. Please try again.");
+  }
+}
+
 async function handleApi(request, response, requestUrl) {
   if (request.method === "OPTIONS") {
     sendJsonResponse(response, 204, {});
@@ -342,6 +506,25 @@ async function handleApi(request, response, requestUrl) {
       const account = await findAccount(body.username);
       if (!account || !(await verifyPassword(String(body.password || ""), account.password_hash))) {
         sendJsonResponse(response, 401, { error: "Incorrect username or password." });
+        return;
+      }
+      const token = createSession(account);
+      sendJsonResponse(response, 200, { token, account: publicAccount(account) });
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/oauth/exchange" && request.method === "POST") {
+      const body = await readJsonBody(request);
+      const code = String(body.code || "");
+      const pending = oauthCodes.get(code);
+      oauthCodes.delete(code);
+      if (!pending || Date.now() - pending.createdAt > 2 * 60 * 1000) {
+        sendJsonResponse(response, 401, { error: "Google sign-in expired. Please try again." });
+        return;
+      }
+      const account = await findAccount(pending.usernameKey);
+      if (!account) {
+        sendJsonResponse(response, 404, { error: "Google account not found." });
         return;
       }
       const token = createSession(account);
@@ -458,6 +641,10 @@ function removePlayer(player) {
 
 const server = http.createServer(async (request, response) => {
   const requestUrl = new URL(request.url, `http://${request.headers.host || "localhost"}`);
+  if (requestUrl.pathname === "/auth/google" || requestUrl.pathname === "/auth/google/callback") {
+    await handleGoogleOAuth(request, response, requestUrl);
+    return;
+  }
   if (requestUrl.pathname.startsWith("/api/")) {
     await handleApi(request, response, requestUrl);
     return;
@@ -623,6 +810,18 @@ const sessionCleanupInterval = setInterval(() => {
   for (const [token, session] of sessions) {
     if (session.createdAt < cutoff) {
       sessions.delete(token);
+    }
+  }
+  const oauthStateCutoff = Date.now() - 10 * 60 * 1000;
+  for (const [state, createdAt] of oauthStates) {
+    if (createdAt < oauthStateCutoff) {
+      oauthStates.delete(state);
+    }
+  }
+  const oauthCodeCutoff = Date.now() - 2 * 60 * 1000;
+  for (const [code, pending] of oauthCodes) {
+    if (pending.createdAt < oauthCodeCutoff) {
+      oauthCodes.delete(code);
     }
   }
 }, 60 * 60 * 1000);

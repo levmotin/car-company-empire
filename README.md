@@ -10,9 +10,9 @@ Open the project in Godot 4.7 and run it, or launch from the project folder:
 /Applications/Godot.app/Contents/MacOS/Godot --path .
 ```
 
-Create an account with a username, company name, password, and brand color.
-Then enter the starter car, visit suppliers, manufacture vehicles at the
-factory, and sell them at the dealership.
+Sign in with Google, or create an account with a username, company name,
+password, and brand color. Then enter the starter car, visit suppliers,
+manufacture vehicles at the factory, and sell them at the dealership.
 
 ## Online accounts and multiplayer
 
@@ -27,6 +27,18 @@ Account progress is stored in PostgreSQL and autosaved: money, reputation,
 company level, research, parts inventory, manufactured cars, sales, objectives,
 and world position. Closing the game removes the live character from the world
 without deleting account progress.
+
+Google accounts use Google's permanent account ID rather than a username as
+their identity, so different players may use the same display name without
+sharing an account. To enable Google sign-in on Render, create a Web application
+OAuth client and register this exact redirect URI:
+
+```text
+https://car-company-empire-online.onrender.com/auth/google/callback
+```
+
+Set the resulting `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the
+`car-company-empire-online` Render service. Never commit the client secret.
 
 ## Controls
 

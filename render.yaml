@@ -12,6 +12,14 @@ services:
         fromDatabase:
           name: car-company-empire-db
           property: connectionString
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: PUBLIC_SERVER_URL
+        value: https://car-company-empire-online.onrender.com
+      - key: PUBLIC_GAME_URL
+        value: https://car-company-empire.onrender.com
 
 databases:
   - name: car-company-empire-db
