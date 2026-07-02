@@ -18,7 +18,7 @@ func _run() -> void:
 				google_only_auth = true
 		password_fields_removed = menu.find_children("*", "LineEdit", true, false).is_empty()
 	var minimap_removed: bool = game.get("hud").find_child("*CITY NAVIGATION*", true, false) == null
-	var imported_track_ready: bool = game.find_child("SouthGardaKartTrack", true, false) != null
+	var imported_track_removed: bool = game.find_child("SouthGardaKartTrack", true, false) == null
 	var drive_through_ready: bool = false
 	var drive_through_terminals := 0
 	for item in game.get("interactables"):
@@ -80,7 +80,7 @@ func _run() -> void:
 	var username_applied: bool = game.get("player_username") == "RenamedDriver"
 	var money_loaded: bool = game.get("money") == 54303
 	var cars_loaded: bool = game.get("manufactured_vehicles").size() == 1
-	if menu_visible and google_only_auth and password_fields_removed and authenticated_menu_ready and profile_editor_ready and profile_applied and order_placed and order_collected and unique_factories_ready and minimap_removed and imported_track_ready and drive_through_ready and drive_through_terminals == 2 and setup_closed and name_applied and username_applied and money_loaded and cars_loaded:
+	if menu_visible and google_only_auth and password_fields_removed and authenticated_menu_ready and profile_editor_ready and profile_applied and order_placed and order_collected and unique_factories_ready and minimap_removed and imported_track_removed and drive_through_ready and drive_through_terminals == 2 and setup_closed and name_applied and username_applied and money_loaded and cars_loaded:
 		print("LAUNCH_SMOKE_PASS")
 		game.queue_free()
 		await process_frame

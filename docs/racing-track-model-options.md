@@ -1,12 +1,5 @@
 # Racing-track model options
 
-## Selected and imported
-
-The game now uses
-[Race track/Karting Track based on South Garda](https://sketchfab.com/3d-models/race-trackkarting-track-based-on-south-garda-32c21042ba144ce9bd2822a88d5b54ec)
-by Mauro3D. The supplied glTF contains 24,483 triangles and is licensed under
-CC BY 4.0. Its original license is stored with the asset.
-
 All three options are downloadable from Sketchfab under the Creative Commons
 Attribution license. Keep the author credit and model link in the game credits
 if a model is added.

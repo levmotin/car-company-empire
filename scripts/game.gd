@@ -2,7 +2,6 @@ extends Node3D
 
 const PlayerScript = preload("res://scripts/player.gd")
 const VehicleScript = preload("res://scripts/vehicle.gd")
-const SouthGardaTrackScene = preload("res://assets/tracks/south_garda/scene.gltf")
 const ONLINE_SERVER_URL := "wss://car-company-empire-online.onrender.com/multiplayer"
 const ACCOUNT_API_BASE_URL := "https://car-company-empire-online.onrender.com/api"
 const NETWORK_SEND_INTERVAL := 0.05
@@ -169,22 +168,7 @@ func _build_clean_map() -> void:
 	_build_clean_landmarks()
 	_build_clean_street_props()
 	_build_clean_power_plant()
-	_build_south_garda_kart_track()
 	_build_clean_border()
-
-func _build_south_garda_kart_track() -> void:
-	# A dedicated western motorsport district keeps this full-size circuit clear
-	# of the central city and the twelve online factory plots.
-	var center := Vector3(-500, 0.08, -420)
-	_box("KartDistrictGround", Vector3(-490, -0.5, -390), Vector3(390, 1, 390), Color("#579651"), true)
-	_road_segment(Vector3(-235, 0.03, -240), Vector3(-345, 0.03, -315), 18.0, Color("#30373e"), true)
-	var track := SouthGardaTrackScene.instantiate() as Node3D
-	track.name = "SouthGardaKartTrack"
-	track.position = center
-	track.scale = Vector3.ONE * 70.0
-	add_child(track)
-	_terminal(center + Vector3(0, 1.02, 142), "race", "SOUTH GARDA KART TRACK", Color("#f5ce3d"))
-	_sign(center + Vector3(0, 13, 150), "EMPIRE KART CIRCUIT", Color("#ffe26c"))
 
 func _build_reclaimed_neighborhood() -> void:
 	var center := Vector3(-180, 0, -180)
@@ -201,7 +185,6 @@ func _build_reclaimed_neighborhood() -> void:
 
 func _build_giant_expansion() -> void:
 	_build_outer_highways()
-	_build_grand_prix_district()
 	_build_auction_district()
 	_build_logistics_park()
 	_build_country_town()
@@ -282,7 +265,7 @@ func _build_outer_highways() -> void:
 	_expansion_road(Vector3(-305, 0, 450), Vector3(690, 0, 18), true)
 	_expansion_road(Vector3(345, 0, 450), Vector3(610, 0, 18), true)
 	for data in [
-		[Vector3(-315, 0, -620), "WEST LOOP  •  GRAND PRIX"],
+		[Vector3(-315, 0, -620), "WEST LOOP  •  CITY"],
 		[Vector3(355, 0, -620), "EAST LOOP  •  AUCTION"],
 		[Vector3(-315, 0, 620), "COUNTRY TOWN"],
 		[Vector3(355, 0, 620), "LOGISTICS PARK"],
@@ -308,33 +291,6 @@ func _highway_sign(pos: Vector3, text: String) -> void:
 	_box("SignPost", pos + Vector3(5, 3.5, 0), Vector3(0.4, 7, 0.4), Color("#384850"), false)
 	_box("HighwaySign", pos + Vector3(0, 6.5, 0), Vector3(14, 4.5, 0.5), Color("#176348"), false)
 	_sign(pos + Vector3(0, 6.5, -0.4), text, Color.WHITE)
-
-func _build_grand_prix_district() -> void:
-	var center := Vector3(-500, 0, -420)
-	_clean_lot(center, Vector3(280, 0, 220), Color("#4e9854"))
-	var points: Array[Vector3] = []
-	for i in range(64):
-		var angle := TAU * float(i) / 64.0
-		var radius_x := 118.0 + sin(angle * 3.0) * 10.0
-		var radius_z := 78.0 + cos(angle * 2.0) * 7.0
-		points.append(center + Vector3(cos(angle) * radius_x, 0, sin(angle) * radius_z))
-	for i in range(points.size()):
-		_track_piece(points[i], points[(i + 1) % points.size()], 16.0)
-	# Pits, grandstand and paddock.
-	_spawn_city_model("res://assets/city/kenney/building-k.glb", Vector3(-500, 0, -420), 18.0, PI * 0.5, Vector3(38, 27, 17))
-	_box("GrandstandBase", Vector3(-500, 3.5, -320), Vector3(110, 7, 18), Color("#69757c"), true)
-	for row in range(5):
-		_box("GrandstandSeat", Vector3(-500, 5.0 + row * 1.1, -326 + row * 2.0), Vector3(104, 0.7, 2.0), [Color("#2f78bf"), Color("#e7c83e"), Color("#e2554a")][row % 3], false)
-	_terminal(Vector3(-500, 1.1, -347), "race", "GRAND PRIX CIRCUIT", Color("#f5ce3d"))
-	_sign(Vector3(-500, 12, -315), "EMPIRE MOTORSPORT PARK", Color("#ffe26c"))
-
-func _track_piece(a: Vector3, b: Vector3, width: float) -> void:
-	var midpoint := (a + b) * 0.5
-	var delta := b - a
-	var piece := _box("RaceTrack", Vector3(midpoint.x, -0.02, midpoint.z), Vector3(width, 0.035, delta.length() + 1.0), Color("#2d3439"), false)
-	piece.rotation.y = atan2(delta.x, delta.z)
-	var line := _box("TrackLine", Vector3(midpoint.x, 0.005, midpoint.z), Vector3(0.28, 0.012, delta.length() + 0.7), Color("#f3f2ea"), false)
-	line.rotation.y = atan2(delta.x, delta.z)
 
 func _build_auction_district() -> void:
 	var center := Vector3(500, 0, -420)
@@ -1286,17 +1242,6 @@ func _build_suppliers() -> void:
 		_sign(p + Vector3(0, 4.0, -14.2), data[1], data[3])
 		_terminal(p + Vector3(0, -3.9, -16.0), data[2], "SHOP", data[3])
 	_sign(Vector3(90, 7.0, 0), "SUPPLIER AVENUE", Color("#4ca6ff"))
-
-func _build_track() -> void:
-	# Stylized oval circuit in the west.
-	var center := Vector3(-118, 0.04, 15)
-	for i in range(64):
-		var angle := TAU * float(i) / 64.0
-		var p := center + Vector3(cos(angle) * 36.0, 0, sin(angle) * 23.0)
-		var segment := _box("Track", p, Vector3(7.5, 0.08, 10.0), Color("#323940"), false)
-		segment.rotation.y = -angle
-	_terminal(Vector3(-118, 1.1, 15), "race", "TEST TRACK", Color("#f4cc45"))
-	_sign(Vector3(-118, 5.0, 15), "R&D TEST CIRCUIT", Color("#f4cc45"))
 
 func _build_scenery() -> void:
 	for i in range(90):
@@ -2387,12 +2332,6 @@ func _open_location(kind: String) -> void:
 			subtitle.text = "Choose a specific manufactured vehicle to auction to collectors for a higher return."
 			var auction_value := 18500 + research * 4000
 			_add_vehicle_sale_list(auction_value, "AUCTION")
-		"race":
-			title.text = "R&D TEST CIRCUIT"
-			subtitle.text = "Complete a manufacturer test session to earn research data and reputation."
-			var test := _ui_button("RUN CERTIFICATION TEST  •  +15 REP")
-			test.pressed.connect(_complete_test)
-			modal_body.add_child(test)
 		"burger_order":
 			title.text = "BURGER DRIVE-THROUGH"
 			if drive_through_order.is_empty():
@@ -2598,14 +2537,6 @@ func _sell_vehicle(vehicle: EmpireVehicle, value: int) -> void:
 	_refresh_hud()
 	_close_modal()
 
-func _complete_test() -> void:
-	research += 1
-	reputation += 15
-	money += 1200
-	_show_toast("Certification passed: +15 reputation, +$1,200.")
-	_refresh_hud()
-	_close_modal()
-
 func _close_modal() -> void:
 	modal.visible = false
 	panel_open = false
@@ -2653,7 +2584,7 @@ func _refresh_hud() -> void:
 		"Visit a supplier and purchase a component.",
 		"Return to your factory and manufacture a car.",
 		"Sell your new vehicle at Empire Auto Gallery.",
-		"Grow the company: research, race and manufacture.",
+		"Grow the company: research, sell and manufacture.",
 	]
 	objective_label.text = objectives[clampi(objective_stage, 0, objectives.size() - 1)]
 	var brand_labels := hud.get_children()
