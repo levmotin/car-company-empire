@@ -62,6 +62,10 @@ to order, then follow the marked lane and collect the meal at the pickup window.
 
 - City Kit Commercial by Kenney — CC0 1.0
 - Downtown City MegaKit by Quaternius — CC0 1.0
+- "Race track/Karting Track based on South Garda" by
+  [Mauro3D](https://sketchfab.com/maurogsw) —
+  [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+  [Original model](https://sketchfab.com/3d-models/race-trackkarting-track-based-on-south-garda-32c21042ba144ce9bd2822a88d5b54ec).
 
 The original license files are included beside the imported assets under
-`assets/city/`.
+`assets/city/` and `assets/tracks/`.

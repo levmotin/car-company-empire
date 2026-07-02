@@ -2,6 +2,7 @@ extends Node3D
 
 const PlayerScript = preload("res://scripts/player.gd")
 const VehicleScript = preload("res://scripts/vehicle.gd")
+const SouthGardaTrackScene = preload("res://assets/tracks/south_garda/scene.gltf")
 const ONLINE_SERVER_URL := "wss://car-company-empire-online.onrender.com/multiplayer"
 const ACCOUNT_API_BASE_URL := "https://car-company-empire-online.onrender.com/api"
 const NETWORK_SEND_INTERVAL := 0.05
@@ -164,7 +165,22 @@ func _build_clean_map() -> void:
 	_build_clean_landmarks()
 	_build_clean_street_props()
 	_build_clean_power_plant()
+	_build_south_garda_kart_track()
 	_build_clean_border()
+
+func _build_south_garda_kart_track() -> void:
+	# A dedicated western motorsport district keeps this full-size circuit clear
+	# of the central city and the twelve online factory plots.
+	var center := Vector3(-500, 0.08, -420)
+	_box("KartDistrictGround", Vector3(-490, -0.5, -390), Vector3(390, 1, 390), Color("#579651"), true)
+	_road_segment(Vector3(-235, 0.03, -240), Vector3(-345, 0.03, -315), 18.0, Color("#30373e"), true)
+	var track := SouthGardaTrackScene.instantiate() as Node3D
+	track.name = "SouthGardaKartTrack"
+	track.position = center
+	track.scale = Vector3.ONE * 70.0
+	add_child(track)
+	_terminal(center + Vector3(0, 1.02, 142), "race", "SOUTH GARDA KART TRACK", Color("#f5ce3d"))
+	_sign(center + Vector3(0, 13, 150), "EMPIRE KART CIRCUIT", Color("#ffe26c"))
 
 func _build_reclaimed_neighborhood() -> void:
 	var center := Vector3(-180, 0, -180)
