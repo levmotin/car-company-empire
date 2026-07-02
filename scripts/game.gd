@@ -67,6 +67,7 @@ var online_connected := false
 var auth_token := ""
 var auth_request: HTTPRequest
 var save_request: HTTPRequest
+var profile_request: HTTPRequest
 var delete_request: HTTPRequest
 var save_in_flight := false
 var progress_dirty := false
@@ -90,6 +91,9 @@ func _ready() -> void:
 	save_request = HTTPRequest.new()
 	save_request.request_completed.connect(_on_save_request_completed)
 	add_child(save_request)
+	profile_request = HTTPRequest.new()
+	profile_request.request_completed.connect(_on_profile_request_completed)
+	add_child(profile_request)
 	delete_request = HTTPRequest.new()
 	delete_request.request_completed.connect(_on_delete_request_completed)
 	add_child(delete_request)
@@ -1738,15 +1742,18 @@ func _show_main_menu() -> void:
 func _show_settings_screen() -> void:
 	_clear_startup_screen()
 	company_setup = _startup_backdrop()
-	var card := _startup_card(Vector2(600, 520))
+	var card := _startup_card(Vector2(640, 690))
 	company_setup.add_child(card)
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 18)
+	box.add_theme_constant_override("separation", 12)
 	card.add_child(box)
-	_add_startup_heading(box, "SETTINGS", "GAME & CONTROLS")
+	_add_startup_heading(box, "SETTINGS", "ACCOUNT & CONTROLS")
+	_add_profile_editor(box)
+	var divider := HSeparator.new()
+	box.add_child(divider)
 	var controls := Label.new()
 	controls.text = "WASD  —  MOVE / DRIVE\nSHIFT  —  SPRINT\nSPACE  —  JUMP / HANDBRAKE\nE  —  INTERACT\nESC  —  RELEASE MOUSE"
-	controls.add_theme_font_size_override("font_size", 18)
+	controls.add_theme_font_size_override("font_size", 15)
 	controls.add_theme_color_override("font_color", Color("#d7e6f2"))
 	box.add_child(controls)
 	var fullscreen := _ui_button("TOGGLE FULLSCREEN")
@@ -2075,6 +2082,104 @@ func _on_save_request_completed(_result: int, response_code: int, _headers: Pack
 	if response_code < 200 or response_code >= 300:
 		progress_dirty = true
 
+func _add_profile_editor(container: VBoxContainer) -> void:
+	var username_label := Label.new()
+	username_label.text = "USERNAME"
+	username_label.add_theme_font_size_override("font_size", 12)
+	container.add_child(username_label)
+	var username_input := LineEdit.new()
+	username_input.name = "ProfileUsername"
+	username_input.text = player_username
+	username_input.placeholder_text = "Your player username"
+	username_input.max_length = 18
+	username_input.custom_minimum_size.y = 42
+	username_input.add_theme_font_size_override("font_size", 18)
+	container.add_child(username_input)
+	var company_label := Label.new()
+	company_label.text = "CAR COMPANY NAME"
+	company_label.add_theme_font_size_override("font_size", 12)
+	container.add_child(company_label)
+	var company_input := LineEdit.new()
+	company_input.name = "ProfileCompany"
+	company_input.text = company_name
+	company_input.placeholder_text = "Your car company"
+	company_input.max_length = 32
+	company_input.custom_minimum_size.y = 42
+	company_input.add_theme_font_size_override("font_size", 18)
+	container.add_child(company_input)
+	var error_label := Label.new()
+	error_label.name = "ProfileError"
+	error_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	error_label.add_theme_font_size_override("font_size", 13)
+	error_label.add_theme_color_override("font_color", Color("#ff9999"))
+	container.add_child(error_label)
+	var save_profile := _ui_button("SAVE USERNAME & COMPANY")
+	save_profile.custom_minimum_size.y = 48
+	save_profile.pressed.connect(_save_profile.bind(username_input, company_input, save_profile, error_label))
+	container.add_child(save_profile)
+
+func _save_profile(username_input: LineEdit, company_input: LineEdit, button: Button, error_label: Label) -> void:
+	if profile_request.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
+		return
+	var username := username_input.text.strip_edges()
+	var company := company_input.text.strip_edges()
+	if username.length() < 3 or company.length() < 2:
+		error_label.text = "Use at least 3 characters for username and 2 for company."
+		return
+	button.disabled = true
+	button.text = "SAVING…"
+	error_label.text = ""
+	profile_request.set_meta("button", button)
+	profile_request.set_meta("error_label", error_label)
+	var headers := PackedStringArray([
+		"Content-Type: application/json",
+		"Authorization: Bearer " + auth_token,
+	])
+	var error := profile_request.request(
+		_account_api_url() + "/profile",
+		headers,
+		HTTPClient.METHOD_PUT,
+		JSON.stringify({"username": username, "company": company})
+	)
+	if error != OK:
+		button.disabled = false
+		button.text = "TRY AGAIN"
+		error_label.text = "Could not contact the account server."
+
+func _on_profile_request_completed(_result: int, response_code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+	var button := profile_request.get_meta("button") as Button
+	var error_label := profile_request.get_meta("error_label") as Label
+	var parsed = JSON.parse_string(body.get_string_from_utf8())
+	if response_code < 200 or response_code >= 300 or not parsed is Dictionary:
+		if is_instance_valid(button):
+			button.disabled = false
+			button.text = "TRY AGAIN"
+		if is_instance_valid(error_label):
+			error_label.text = str(parsed.get("error", "Profile update failed.")) if parsed is Dictionary else "Profile update failed."
+		return
+	var account = parsed.get("account", {})
+	if not account is Dictionary:
+		return
+	_apply_profile(account)
+	_show_toast("Username and company name saved.")
+	if game_started:
+		_close_modal()
+	else:
+		_show_main_menu()
+
+func _apply_profile(account: Dictionary) -> void:
+	player_username = str(account.get("username", player_username)).left(18)
+	company_name = str(account.get("company", company_name)).left(32).to_upper()
+	if online_peer_id != 0:
+		var identity: Dictionary = online_peers.get(online_peer_id, {})
+		identity["username"] = player_username
+		identity["company"] = company_name
+		online_peers[online_peer_id] = identity
+		if local_factory_slot >= 0:
+			_assign_factory_owner(online_peer_id, local_factory_slot, company_name, true)
+		_update_online_status()
+	_refresh_hud()
+
 func _open_account_settings() -> void:
 	panel_open = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
@@ -2087,10 +2192,11 @@ func _open_account_settings() -> void:
 	title.add_theme_font_size_override("font_size", 29)
 	modal_body.add_child(title)
 	var identity := Label.new()
-	identity.text = "%s\n%s\n\nProgress saves automatically to your online account." % [player_username, company_name]
-	identity.add_theme_font_size_override("font_size", 17)
+	identity.text = "Change how your name and company appear to every online player."
+	identity.add_theme_font_size_override("font_size", 15)
 	identity.add_theme_color_override("font_color", Color("#d8e6f2"))
 	modal_body.add_child(identity)
+	_add_profile_editor(modal_body)
 	var delete_button := _ui_button("DELETE ACCOUNT")
 	delete_button.add_theme_color_override("font_color", Color("#ffb0b0"))
 	delete_button.pressed.connect(_account_delete_pressed.bind(delete_button))
@@ -2677,6 +2783,25 @@ func _handle_online_message(message: Dictionary) -> void:
 		"player_joined":
 			_receive_online_identity(message)
 			_show_toast("%s joined the online world." % str(message.get("username", "A player")))
+		"profile_updated":
+			var profile_peer_id := int(message.get("id", 0))
+			var updated_username := str(message.get("username", "DRIVER")).left(18)
+			var updated_company := str(message.get("company", "ONLINE MOTORS")).left(32)
+			if profile_peer_id == online_peer_id:
+				player_username = updated_username
+				company_name = updated_company
+			var profile_identity: Dictionary = online_peers.get(profile_peer_id, {})
+			profile_identity["username"] = updated_username
+			profile_identity["company"] = updated_company
+			online_peers[profile_peer_id] = profile_identity
+			var profile_slot := int(profile_identity.get("factory_slot", -1))
+			if profile_slot >= 0:
+				_assign_factory_owner(profile_peer_id, profile_slot, updated_company, profile_peer_id == online_peer_id)
+			if remote_players.has(profile_peer_id):
+				var remote_profile: EmpirePlayer = remote_players[profile_peer_id]
+				remote_profile.update_remote_profile(updated_username, updated_company)
+			_update_online_status()
+			_refresh_hud()
 		"player_left":
 			var departed_id := int(message.get("id", 0))
 			var departed: Dictionary = online_peers.get(departed_id, {})

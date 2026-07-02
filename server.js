@@ -70,6 +70,13 @@ function cleanUsername(value) {
     .slice(0, 18);
 }
 
+function cleanCompany(value) {
+  return String(value || "")
+    .replace(/[^\p{L}\p{N}&' ._-]/gu, "")
+    .trim()
+    .slice(0, 32);
+}
+
 function cleanColor(value) {
   const color = String(value || "").replace(/^#/, "");
   return /^[0-9a-fA-F]{6}$/.test(color) ? color.toLowerCase() : "1677ff";
@@ -269,6 +276,27 @@ async function updateAccountProgress(usernameKey, progress) {
     return null;
   }
   account.progress = cleanProgress;
+  saveLocalAccounts();
+  return account;
+}
+
+async function updateAccountProfile(usernameKey, username, company) {
+  if (pool) {
+    const result = await pool.query(
+      `UPDATE accounts
+       SET username = $1, company = $2, updated_at = NOW()
+       WHERE username_key = $3
+       RETURNING *`,
+      [username, company, usernameKey],
+    );
+    return result.rows[0] || null;
+  }
+  const account = localAccounts[usernameKey];
+  if (!account) {
+    return null;
+  }
+  account.username = username;
+  account.company = company;
   saveLocalAccounts();
   return account;
 }
@@ -528,6 +556,43 @@ async function handleApi(request, response, requestUrl) {
       return;
     }
 
+    if (requestUrl.pathname === "/api/profile" && request.method === "PUT") {
+      const usernameKey = accountKeyFromRequest(request);
+      if (!usernameKey) {
+        sendJsonResponse(response, 401, { error: "Sign in required." });
+        return;
+      }
+      const body = await readJsonBody(request);
+      const username = cleanUsername(body.username);
+      const company = cleanCompany(body.company);
+      if (username.length < 3 || company.length < 2) {
+        sendJsonResponse(response, 400, {
+          error: "Use a 3+ character username and 2+ character company name.",
+        });
+        return;
+      }
+      const account = await updateAccountProfile(usernameKey, username, company);
+      if (!account) {
+        sendJsonResponse(response, 404, { error: "Account not found." });
+        return;
+      }
+      for (const player of players.values()) {
+        if (!player.joined || player.accountKey !== usernameKey) {
+          continue;
+        }
+        player.username = account.username;
+        player.company = account.company;
+        broadcast({
+          type: "profile_updated",
+          id: player.id,
+          username: player.username,
+          company: player.company,
+        });
+      }
+      sendJsonResponse(response, 200, { account: publicAccount(account) });
+      return;
+    }
+
     if (requestUrl.pathname === "/api/account" && request.method === "DELETE") {
       const usernameKey = accountKeyFromRequest(request);
       if (!usernameKey) {
@@ -679,6 +744,7 @@ websocketServer.on("connection", (socket) => {
     id: nextPlayerId++,
     socket,
     joined: false,
+    accountKey: "",
     factorySlot: -1,
     username: "",
     company: "",
@@ -715,6 +781,7 @@ websocketServer.on("connection", (socket) => {
       player.username = account.username;
       player.company = account.company;
       player.color = account.color;
+      player.accountKey = account.username_key;
       player.factorySlot = availableFactorySlot();
       if (player.factorySlot < 0) {
         sendSocketJson(socket, { type: "world_full", error: "Every factory plot is occupied." });

@@ -28,6 +28,10 @@ company level, research, parts inventory, manufactured cars, sales, objectives,
 and world position. Closing the game removes the live character from the world
 without deleting account progress.
 
+Players can change their displayed username and car company name from
+**Settings** before joining or from **Account** while playing. Profile changes
+are saved to the online account and broadcast to connected players.
+
 Google accounts use Google's permanent account ID rather than a username as
 their identity, so different players may use the same display name without
 sharing an account. To enable Google sign-in on Render, create a Web application

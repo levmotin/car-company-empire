@@ -86,9 +86,31 @@ async function run() {
   const sessionResponse = await fetch(`${apiUrl}/session`, {
     headers: { Authorization: `Bearer ${firstAccount.token}` },
   });
-  const session = await sessionResponse.json();
+  let session = await sessionResponse.json();
   assert.equal(session.account.progress.money, 54321);
   assert.equal(session.account.progress.cars[0].name, "TEST GT");
+
+  const profileResponse = await fetch(`${apiUrl}/profile`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${firstAccount.token}`,
+    },
+    body: JSON.stringify({
+      username: "Renamed Driver",
+      company: "Renamed Motors",
+    }),
+  });
+  assert.equal(profileResponse.status, 200);
+  const renamed = await profileResponse.json();
+  assert.equal(renamed.account.username, "Renamed Driver");
+  assert.equal(renamed.account.company, "Renamed Motors");
+  const renamedSessionResponse = await fetch(`${apiUrl}/session`, {
+    headers: { Authorization: `Bearer ${firstAccount.token}` },
+  });
+  session = await renamedSessionResponse.json();
+  assert.equal(session.account.username, "Renamed Driver");
+  assert.equal(session.account.company, "Renamed Motors");
 
   const left = nextMessage(first, (message) => (
     message.type === "player_left" && message.id === secondWelcome.id

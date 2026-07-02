@@ -88,6 +88,13 @@ func apply_remote_state(target_position: Vector3, facing_yaw: float, moving: boo
 	remote_target_yaw = facing_yaw
 	remote_is_moving = moving
 
+func update_remote_profile(username: String, company: String) -> void:
+	remote_username = username
+	remote_company = company
+	for child in get_children():
+		if child is Label3D:
+			child.text = remote_username
+
 func _build_character() -> void:
 	var jacket := StandardMaterial3D.new()
 	jacket.albedo_color = Color("#175cd3")
