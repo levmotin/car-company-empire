@@ -18,6 +18,12 @@ func _run() -> void:
 				google_only_auth = true
 		password_fields_removed = menu.find_children("*", "LineEdit", true, false).is_empty()
 	var minimap_removed: bool = game.get("hud").find_child("*CITY NAVIGATION*", true, false) == null
+	var drive_through_ready: bool = false
+	var drive_through_terminals := 0
+	for item in game.get("interactables"):
+		if str(item.get_meta("kind", "")).begins_with("burger_"):
+			drive_through_terminals += 1
+			drive_through_ready = drive_through_ready or bool(item.get_meta("allow_vehicle", false))
 	game.call("_apply_account", {
 		"username": "TestDriver",
 		"company": "Test Motors",
@@ -39,6 +45,10 @@ func _run() -> void:
 	game.call("_show_main_menu")
 	await process_frame
 	var authenticated_menu_ready: bool = not game.get("game_started") and not game.get("hud").visible
+	game.call("_place_drive_through_order", "TEST COMBO", 18)
+	var order_placed: bool = game.get("drive_through_order") == "TEST COMBO" and game.get("money") == 54303
+	game.call("_collect_drive_through_order")
+	var order_collected: bool = game.get("drive_through_order") == "" and game.get("reputation") == 13
 	game.set("online_peer_id", 101)
 	game.call("_assign_local_factory", 0)
 	game.call("_assign_factory_owner", 202, 1, "REMOTE MOTORS", false)
@@ -57,9 +67,9 @@ func _run() -> void:
 	var setup_closed: bool = not is_instance_valid(setup) or not setup.visible
 	var name_applied: bool = game.get("company_name") == "TEST MOTORS"
 	var username_applied: bool = game.get("player_username") == "TestDriver"
-	var money_loaded: bool = game.get("money") == 54321
+	var money_loaded: bool = game.get("money") == 54303
 	var cars_loaded: bool = game.get("manufactured_vehicles").size() == 1
-	if menu_visible and google_only_auth and password_fields_removed and authenticated_menu_ready and unique_factories_ready and minimap_removed and setup_closed and name_applied and username_applied and money_loaded and cars_loaded:
+	if menu_visible and google_only_auth and password_fields_removed and authenticated_menu_ready and order_placed and order_collected and unique_factories_ready and minimap_removed and drive_through_ready and drive_through_terminals == 2 and setup_closed and name_applied and username_applied and money_loaded and cars_loaded:
 		print("LAUNCH_SMOKE_PASS")
 		game.queue_free()
 		await process_frame

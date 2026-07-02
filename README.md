@@ -53,8 +53,10 @@ the purge runs only once.
 - `E` — interact / enter / exit
 - `Esc` — release or capture the mouse
 
-The city, buildings, roads, cars, UI, dealerships, factory, suppliers, and test
-track are assembled by the Godot client after the online account connects.
+The city, buildings, roads, cars, UI, dealerships, factory, suppliers,
+drive-through restaurant, and test track are assembled by the Godot client
+after the online account connects. Drive to the restaurant speaker, press `E`
+to order, then follow the marked lane and collect the meal at the pickup window.
 
 ## Asset credits
 

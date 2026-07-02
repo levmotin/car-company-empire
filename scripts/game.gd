@@ -71,6 +71,8 @@ var save_in_flight := false
 var progress_dirty := false
 var autosave_accumulator := 0.0
 var game_started := false
+var drive_through_order := ""
+var drive_through_order_price := 0
 
 func _ready() -> void:
 	_setup_styles()
@@ -831,13 +833,32 @@ func _build_burger_drive(center: Vector3) -> void:
 	var red := Color("#c83d32")
 	var yellow := Color("#f3be32")
 	_building(center + Vector3(-4, 3.7, 4), Vector3(40, 7.4, 30), cream)
+	# The lane runs along the restaurant's east wall, from the speaker to the
+	# pickup window. Bright curbs and arrows make the route readable at speed.
+	_box("DriveLane", center + Vector3(21, 0.015, 3), Vector3(15, 0.03, 52), Color("#303538"), false)
+	for z in [-19.0, -3.0, 13.0, 25.0]:
+		_box("DriveArrow", center + Vector3(21, 0.045, z), Vector3(0.7, 0.025, 5.0), yellow, false)
+		_box("DriveArrowHead", center + Vector3(21, 0.05, z + 2.3), Vector3(3.4, 0.03, 0.65), yellow, false)
+	for x in [13.8, 28.2]:
+		_box("DriveCurb", center + Vector3(x, 0.18, 3), Vector3(0.55, 0.36, 52), red, false)
 	_box("DriveCanopy", center + Vector3(21, 4.2, 5), Vector3(11, 0.7, 25), red, false)
 	_box("DrivePost", center + Vector3(25, 2.0, -5), Vector3(0.6, 4.0, 0.6), red, false)
 	_box("DrivePost", center + Vector3(25, 2.0, 15), Vector3(0.6, 4.0, 0.6), red, false)
+	_box("MenuBoardPost", center + Vector3(27, 1.8, -17), Vector3(0.5, 3.6, 0.5), Color("#343a3e"), false)
+	_box("MenuBoard", center + Vector3(27, 3.5, -17), Vector3(0.7, 4.0, 6.5), Color("#22292e"), false)
+	_sign(center + Vector3(26.5, 4.0, -17), "MENU", yellow)
+	_box("PickupWindow", center + Vector3(16.2, 3.0, 10), Vector3(0.35, 3.2, 6.0), Color("#6bb9cf"), false)
+	_sign(center + Vector3(16.0, 5.2, 10), "PICKUP", yellow)
 	_box("FoodSignPost", center + Vector3(-24, 5.0, -20), Vector3(0.7, 10, 0.7), Color("#40484d"), false)
 	_box("FoodSign", center + Vector3(-24, 9.0, -20), Vector3(8.5, 4.2, 0.8), red, false)
 	_sign(center + Vector3(-24, 9.0, -20.5), "B", yellow)
 	_sign(center + Vector3(-4, 7.4, -11.6), "BURGER DRIVE", yellow)
+	var order_terminal := _terminal(center + Vector3(21, 1.1, -17), "burger_order", "ORDER AT SPEAKER", yellow)
+	order_terminal.set_meta("allow_vehicle", true)
+	order_terminal.set_meta("vehicle_only", true)
+	var pickup_terminal := _terminal(center + Vector3(21, 1.1, 10), "burger_pickup", "COLLECT ORDER", Color("#65e6a8"))
+	pickup_terminal.set_meta("allow_vehicle", true)
+	pickup_terminal.set_meta("vehicle_only", true)
 
 func _build_clinic(center: Vector3) -> void:
 	_clean_lot(center, Vector3(60, 0, 60), Color("#8d9699"))
@@ -2144,15 +2165,24 @@ func _update_nearest() -> void:
 			nearest = item
 	action_label.visible = nearest != null or current_vehicle != null
 	if current_vehicle:
-		action_label.text = "[ E ]  EXIT VEHICLE"
+		if nearest and bool(nearest.get_meta("allow_vehicle", false)):
+			action_label.text = "[ E ]  " + str(nearest.get_meta("title"))
+		else:
+			action_label.text = "[ E ]  EXIT VEHICLE"
 	elif nearest is EmpireVehicle:
 		action_label.text = "[ E ]  DRIVE " + nearest.brand_name
 	elif nearest:
-		action_label.text = "[ E ]  " + str(nearest.get_meta("title"))
+		if bool(nearest.get_meta("vehicle_only", false)):
+			action_label.text = "[ E ]  DRIVE-THROUGH REQUIRES A CAR"
+		else:
+			action_label.text = "[ E ]  " + str(nearest.get_meta("title"))
 
 func _interact() -> void:
 	if current_vehicle:
-		current_vehicle.exit()
+		if nearest and bool(nearest.get_meta("allow_vehicle", false)):
+			_open_location(str(nearest.get_meta("kind")))
+		else:
+			current_vehicle.exit()
 		return
 	if nearest is EmpireVehicle:
 		nearest.enter(player)
@@ -2162,12 +2192,17 @@ func _interact() -> void:
 			_refresh_hud()
 		return
 	if nearest:
+		if bool(nearest.get_meta("vehicle_only", false)):
+			_show_toast("Enter a vehicle to use the drive-through.")
+			return
 		_open_location(str(nearest.get_meta("kind")))
 
 func _open_location(kind: String) -> void:
 	panel_open = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	player.enabled = false
+	if current_vehicle:
+		current_vehicle.set_physics_process(false)
 	modal.visible = true
 	for child in modal_body.get_children():
 		child.queue_free()
@@ -2236,6 +2271,24 @@ func _open_location(kind: String) -> void:
 			var test := _ui_button("RUN CERTIFICATION TEST  •  +15 REP")
 			test.pressed.connect(_complete_test)
 			modal_body.add_child(test)
+		"burger_order":
+			title.text = "BURGER DRIVE-THROUGH"
+			if drive_through_order.is_empty():
+				subtitle.text = "Order at the speaker, then follow the marked lane to the pickup window."
+				_drive_through_item("KING STACK COMBO", 18, "Double burger  •  Fries  •  Soda")
+				_drive_through_item("CHICKEN ROAD BOX", 14, "Crispy chicken  •  Fries  •  Soda")
+				_drive_through_item("NIGHT SHIFT COFFEE", 7, "Large coffee  •  Warm cookie")
+			else:
+				subtitle.text = drive_through_order + " is already being prepared. Continue to the pickup window."
+		"burger_pickup":
+			title.text = "PICKUP WINDOW"
+			if drive_through_order.is_empty():
+				subtitle.text = "No order is waiting. Drive back to the menu speaker first."
+			else:
+				subtitle.text = drive_through_order + " is ready. Collect it without leaving your car."
+				var collect := _ui_button("COLLECT ORDER  •  +3 REP")
+				collect.pressed.connect(_collect_drive_through_order)
+				modal_body.add_child(collect)
 		"airport_cargo":
 			title.text = "EMPIRE INTERNATIONAL CARGO"
 			subtitle.text = "Air freight provides rare electronics and lightweight components at premium prices."
@@ -2434,8 +2487,39 @@ func _complete_test() -> void:
 func _close_modal() -> void:
 	modal.visible = false
 	panel_open = false
-	player.enabled = true
+	if current_vehicle:
+		player.enabled = false
+		current_vehicle.set_physics_process(true)
+	else:
+		player.enabled = true
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+func _drive_through_item(item_name: String, price: int, details: String) -> void:
+	var button := _ui_button(item_name + "  •  $" + str(price) + "\n" + details)
+	button.disabled = money < price
+	button.pressed.connect(_place_drive_through_order.bind(item_name, price))
+	modal_body.add_child(button)
+
+func _place_drive_through_order(item_name: String, price: int) -> void:
+	if not drive_through_order.is_empty() or money < price:
+		return
+	money -= price
+	drive_through_order = item_name
+	drive_through_order_price = price
+	_refresh_hud()
+	_show_toast("Order placed. Follow the lane to the pickup window.")
+	_close_modal()
+
+func _collect_drive_through_order() -> void:
+	if drive_through_order.is_empty():
+		return
+	var collected_order := drive_through_order
+	drive_through_order = ""
+	drive_through_order_price = 0
+	reputation += 3
+	_refresh_hud()
+	_show_toast(collected_order + " collected. Enjoy the drive!")
+	_close_modal()
 
 func _refresh_hud() -> void:
 	if not money_label:
