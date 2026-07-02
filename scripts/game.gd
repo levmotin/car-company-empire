@@ -1721,88 +1721,32 @@ func _show_settings_screen() -> void:
 	back.pressed.connect(_show_main_menu)
 	box.add_child(back)
 
-func _show_auth_screen(sign_in: bool) -> void:
+func _show_auth_screen(_sign_in: bool = true) -> void:
 	_clear_startup_screen()
 	company_setup = _startup_backdrop()
-	var card_size := Vector2(680, 650 if sign_in else 710)
-	var card := _startup_card(card_size)
+	var card := _startup_card(Vector2(640, 430))
 	company_setup.add_child(card)
 	var box := VBoxContainer.new()
-	box.add_theme_constant_override("separation", 11)
+	box.alignment = BoxContainer.ALIGNMENT_CENTER
+	box.add_theme_constant_override("separation", 20)
 	card.add_child(box)
-	_add_startup_heading(box, "CAR COMPANY EMPIRE", "SIGN IN" if sign_in else "CREATE ACCOUNT")
-	var mode_row := HBoxContainer.new()
-	mode_row.add_theme_constant_override("separation", 10)
-	box.add_child(mode_row)
-	var sign_in_tab := _ui_button("SIGN IN")
-	sign_in_tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	sign_in_tab.pressed.connect(_show_auth_screen.bind(true))
-	mode_row.add_child(sign_in_tab)
-	var sign_up_tab := _ui_button("SIGN UP")
-	sign_up_tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	sign_up_tab.pressed.connect(_show_auth_screen.bind(false))
-	mode_row.add_child(sign_up_tab)
-	var google_button := _ui_button("CONTINUE WITH GOOGLE")
-	google_button.custom_minimum_size.y = 52
+	_add_startup_heading(box, "CAR COMPANY EMPIRE", "GOOGLE ACCOUNT")
+	var explanation := Label.new()
+	explanation.text = "Sign in with Google to play.\nYour first sign-in creates a new saved company automatically."
+	explanation.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	explanation.add_theme_font_size_override("font_size", 17)
+	explanation.add_theme_color_override("font_color", Color("#c7d8e6"))
+	box.add_child(explanation)
+	var google_button := _ui_button("SIGN IN OR SIGN UP WITH GOOGLE")
+	google_button.custom_minimum_size.y = 66
 	google_button.pressed.connect(_start_google_sign_in)
 	box.add_child(google_button)
-	var password_separator := Label.new()
-	password_separator.text = "OR USE USERNAME AND PASSWORD"
-	password_separator.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	password_separator.add_theme_font_size_override("font_size", 11)
-	password_separator.add_theme_color_override("font_color", Color("#7f9aaf"))
-	box.add_child(password_separator)
-	var username_input := _auth_input(box, "USERNAME", "Your player username", false, 18)
-	var password_input := _auth_input(box, "PASSWORD", "At least 6 characters", true, 72)
-	var show_password := CheckButton.new()
-	show_password.text = "SHOW PASSWORD"
-	show_password.add_theme_font_size_override("font_size", 13)
-	show_password.add_theme_color_override("font_color", Color("#b8ccdc"))
-	show_password.toggled.connect(_toggle_password_visibility.bind(password_input))
-	box.add_child(show_password)
-	var company_input: LineEdit
-	if not sign_in:
-		company_input = _auth_input(box, "COMPANY NAME", "Your automotive company", false, 32)
-		var color_label := Label.new()
-		color_label.text = "COMPANY COLOR"
-		color_label.add_theme_font_size_override("font_size", 12)
-		box.add_child(color_label)
-		var colors := HBoxContainer.new()
-		colors.add_theme_constant_override("separation", 10)
-		box.add_child(colors)
-		var palette := [Color("#ff6333"), Color("#1677ff"), Color("#24c78a"), Color("#a95cff"), Color("#f2c94c")]
-		for index in range(palette.size()):
-			var color: Color = palette[index]
-			var color_button := Button.new()
-			color_button.custom_minimum_size = Vector2(72, 44)
-			color_button.focus_mode = Control.FOCUS_NONE
-			color_button.add_theme_font_size_override("font_size", 22)
-			color_button.add_theme_color_override("font_color", Color.WHITE)
-			var color_style := StyleBoxFlat.new()
-			color_style.bg_color = color
-			color_style.set_corner_radius_all(8)
-			color_button.add_theme_stylebox_override("normal", color_style)
-			color_button.add_theme_stylebox_override("hover", color_style)
-			color_button.add_theme_stylebox_override("pressed", color_style)
-			colors.add_child(color_button)
-			color_button.pressed.connect(_select_brand_color.bind(color, color_button, colors))
-			if index == 0:
-				_select_brand_color(color, color_button, colors)
-	var error_label := Label.new()
-	error_label.name = "AuthError"
-	error_label.custom_minimum_size.y = 40
-	error_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	error_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	error_label.add_theme_font_size_override("font_size", 14)
-	error_label.add_theme_color_override("font_color", Color("#ff8d8d"))
-	box.add_child(error_label)
-	var submit := _ui_button("SIGN IN" if sign_in else "CREATE ACCOUNT")
-	submit.custom_minimum_size.y = 58
-	if sign_in:
-		submit.pressed.connect(_submit_sign_in.bind(username_input, password_input, submit, error_label))
-	else:
-		submit.pressed.connect(_submit_sign_up.bind(username_input, password_input, company_input, submit, error_label))
-	box.add_child(submit)
+	var online_only := Label.new()
+	online_only.text = "GOOGLE ACCOUNT REQUIRED  •  ONLINE ONLY  •  PROGRESS AUTOSAVES"
+	online_only.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	online_only.add_theme_font_size_override("font_size", 12)
+	online_only.add_theme_color_override("font_color", Color("#63d5ff"))
+	box.add_child(online_only)
 
 func _startup_backdrop() -> ColorRect:
 	var backdrop := ColorRect.new()
@@ -1831,52 +1775,6 @@ func _add_startup_heading(box: VBoxContainer, kicker_text: String, title_text: S
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.add_theme_font_size_override("font_size", 36)
 	box.add_child(title)
-
-func _auth_input(box: VBoxContainer, label_text: String, placeholder: String, secret: bool, limit: int) -> LineEdit:
-	var label := Label.new()
-	label.text = label_text
-	label.add_theme_font_size_override("font_size", 12)
-	box.add_child(label)
-	var input := LineEdit.new()
-	input.placeholder_text = placeholder
-	input.max_length = limit
-	input.secret = secret
-	input.add_theme_font_size_override("font_size", 19)
-	input.custom_minimum_size.y = 44
-	box.add_child(input)
-	return input
-
-func _toggle_password_visibility(visible_password: bool, password_input: LineEdit) -> void:
-	password_input.secret = not visible_password
-
-func _submit_sign_in(username_input: LineEdit, password_input: LineEdit, button: Button, error_label: Label) -> void:
-	_submit_auth("/signin", {
-		"username": username_input.text.strip_edges(),
-		"password": password_input.text,
-	}, button, error_label)
-
-func _submit_sign_up(username_input: LineEdit, password_input: LineEdit, company_input: LineEdit, button: Button, error_label: Label) -> void:
-	_submit_auth("/signup", {
-		"username": username_input.text.strip_edges(),
-		"password": password_input.text,
-		"company": company_input.text.strip_edges(),
-		"color": brand_color.to_html(false),
-	}, button, error_label)
-
-func _submit_auth(endpoint: String, body: Dictionary, button: Button, error_label: Label) -> void:
-	if auth_request.get_http_client_status() != HTTPClient.STATUS_DISCONNECTED:
-		return
-	button.disabled = true
-	button.text = "CONTACTING SERVER…"
-	error_label.text = ""
-	auth_request.set_meta("button", button)
-	auth_request.set_meta("error_label", error_label)
-	var headers := PackedStringArray(["Content-Type: application/json"])
-	var error := auth_request.request(_account_api_url() + endpoint, headers, HTTPClient.METHOD_POST, JSON.stringify(body))
-	if error != OK:
-		button.disabled = false
-		button.text = "TRY AGAIN"
-		error_label.text = "Could not contact the account server."
 
 func _start_google_sign_in() -> void:
 	var oauth_url := _account_api_url().trim_suffix("/api") + "/auth/google"
@@ -2206,20 +2104,6 @@ func _online_server_url() -> String:
 		if argument.begins_with("--online-url="):
 			return argument.trim_prefix("--online-url=")
 	return ONLINE_SERVER_URL
-
-func _select_brand_color(color: Color, selected_button: Button, group: HBoxContainer) -> void:
-	brand_color = color
-	for child in group.get_children():
-		if child is Button:
-			child.text = ""
-			var style := child.get_theme_stylebox("normal") as StyleBoxFlat
-			if style:
-				style.set_border_width_all(0)
-	selected_button.text = "✓"
-	var selected_style := selected_button.get_theme_stylebox("normal") as StyleBoxFlat
-	if selected_style:
-		selected_style.border_color = Color.WHITE
-		selected_style.set_border_width_all(3)
 
 func _input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:

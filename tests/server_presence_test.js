@@ -33,17 +33,10 @@ function nextMessage(socket, predicate, timeoutMs = 5000) {
 }
 
 async function createAccount(label) {
-  const suffix = `${Date.now()}${Math.floor(Math.random() * 1000)}`;
-  const username = `${label}${suffix}`.slice(0, 18);
-  const response = await fetch(`${apiUrl}/signup`, {
+  const response = await fetch(`${apiUrl}/test-account`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      username,
-      password: "test-password",
-      company: `${label} MOTORS`,
-      color: "1677ff",
-    }),
+    body: JSON.stringify({ label }),
   });
   assert.equal(response.status, 201);
   return response.json();

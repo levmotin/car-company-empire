@@ -10,6 +10,13 @@ func _run() -> void:
 	await process_frame
 	var menu = game.get("company_setup")
 	var menu_visible: bool = is_instance_valid(menu) and menu.visible
+	var google_only_auth: bool = false
+	var password_fields_removed: bool = true
+	if is_instance_valid(menu):
+		for node in menu.find_children("*", "Button", true, false):
+			if node is Button and node.text == "SIGN IN OR SIGN UP WITH GOOGLE":
+				google_only_auth = true
+		password_fields_removed = menu.find_children("*", "LineEdit", true, false).is_empty()
 	var minimap_removed: bool = game.get("hud").find_child("*CITY NAVIGATION*", true, false) == null
 	game.call("_apply_account", {
 		"username": "TestDriver",
@@ -52,7 +59,7 @@ func _run() -> void:
 	var username_applied: bool = game.get("player_username") == "TestDriver"
 	var money_loaded: bool = game.get("money") == 54321
 	var cars_loaded: bool = game.get("manufactured_vehicles").size() == 1
-	if menu_visible and authenticated_menu_ready and unique_factories_ready and minimap_removed and setup_closed and name_applied and username_applied and money_loaded and cars_loaded:
+	if menu_visible and google_only_auth and password_fields_removed and authenticated_menu_ready and unique_factories_ready and minimap_removed and setup_closed and name_applied and username_applied and money_loaded and cars_loaded:
 		print("LAUNCH_SMOKE_PASS")
 		game.queue_free()
 		await process_frame

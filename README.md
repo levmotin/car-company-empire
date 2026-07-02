@@ -10,13 +10,13 @@ Open the project in Godot 4.7 and run it, or launch from the project folder:
 /Applications/Godot.app/Contents/MacOS/Godot --path .
 ```
 
-Sign in with Google, or create an account with a username, company name,
-password, and brand color. Then enter the starter car, visit suppliers,
-manufacture vehicles at the factory, and sell them at the dealership.
+Sign in or sign up with Google. Username-and-password accounts are not
+supported. Then enter the starter car, visit suppliers, manufacture vehicles at
+the factory, and sell them at the dealership.
 
 ## Online accounts and multiplayer
 
-The game is online-only. Select **Play**, then sign in or create an account.
+The game is online-only. Select **Play**, then continue with Google.
 Browser and desktop players connect through the hosted WebSocket service, so
 friends share one world and see one another walking and driving. Usernames
 appear above characters and in the online roster. The server assigns every
@@ -39,6 +39,10 @@ https://car-company-empire-online.onrender.com/auth/google/callback
 
 Set the resulting `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the
 `car-company-empire-online` Render service. Never commit the client secret.
+
+The `google_only_accounts_v1` database migration deletes every account that
+existed before the Google-only release. It is recorded in `app_migrations`, so
+the purge runs only once.
 
 ## Controls
 

@@ -4,10 +4,8 @@ const http = require("node:http");
 const path = require("node:path");
 const fs = require("node:fs");
 const crypto = require("node:crypto");
-const { promisify } = require("node:util");
 const { WebSocketServer, WebSocket } = require("ws");
 
-const scrypt = promisify(crypto.scrypt);
 const port = Number(process.env.PORT || 8080);
 const webRoot = path.join(__dirname, "web");
 const maxPlayers = 12;
@@ -23,6 +21,9 @@ const googleRedirectUri = `${publicServerUrl}/auth/google/callback`;
 const oauthStates = new Map();
 const oauthCodes = new Map();
 const localDataPath = path.join(__dirname, ".data", "accounts.json");
+const localGoogleOnlyMigrationPath = path.join(__dirname, ".data", "google-only-accounts-v1.done");
+const googleOnlyMigrationKey = "google_only_accounts_v1";
+const allowTestAuth = process.env.ALLOW_TEST_AUTH === "true";
 const pool = databaseUrl
   ? new Pool({ connectionString: databaseUrl, ssl: { rejectUnauthorized: false } })
   : null;
@@ -67,13 +68,6 @@ function cleanUsername(value) {
     .replace(/[^a-zA-Z0-9_ -]/g, "")
     .trim()
     .slice(0, 18);
-}
-
-function cleanCompany(value) {
-  return String(value || "")
-    .replace(/[^\p{L}\p{N}&' ._-]/gu, "")
-    .trim()
-    .slice(0, 32);
 }
 
 function cleanColor(value) {
@@ -128,22 +122,6 @@ function sanitizeProgress(value) {
   };
 }
 
-async function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString("hex");
-  const derived = await scrypt(password, salt, 64);
-  return `${salt}:${Buffer.from(derived).toString("hex")}`;
-}
-
-async function verifyPassword(password, stored) {
-  const [salt, expectedHex] = String(stored || "").split(":");
-  if (!salt || !expectedHex) {
-    return false;
-  }
-  const actual = Buffer.from(await scrypt(password, salt, 64));
-  const expected = Buffer.from(expectedHex, "hex");
-  return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
-}
-
 async function initializeStore() {
   if (pool) {
     await pool.query(`
@@ -166,6 +144,33 @@ async function initializeStore() {
       ON accounts (google_sub)
       WHERE google_sub IS NOT NULL
     `);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS app_migrations (
+        key TEXT PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const migration = await client.query(
+        `INSERT INTO app_migrations (key)
+         VALUES ($1)
+         ON CONFLICT (key) DO NOTHING
+         RETURNING key`,
+        [googleOnlyMigrationKey],
+      );
+      if (migration.rowCount > 0) {
+        await client.query("DELETE FROM accounts");
+        console.log("Deleted existing accounts for the Google-only authentication migration.");
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
     return;
   }
   fs.mkdirSync(path.dirname(localDataPath), { recursive: true });
@@ -173,6 +178,11 @@ async function initializeStore() {
     localAccounts = JSON.parse(fs.readFileSync(localDataPath, "utf8"));
   } catch {
     localAccounts = {};
+  }
+  if (!fs.existsSync(localGoogleOnlyMigrationPath)) {
+    localAccounts = {};
+    saveLocalAccounts();
+    fs.writeFileSync(localGoogleOnlyMigrationPath, new Date().toISOString());
   }
 }
 
@@ -201,37 +211,6 @@ async function findGoogleAccount(googleSub) {
     return result.rows[0] || null;
   }
   return Object.values(localAccounts).find((account) => account.google_sub === googleSub) || null;
-}
-
-async function createAccount(username, passwordHash, company, color) {
-  const record = {
-    username,
-    username_key: username.toLowerCase(),
-    password_hash: passwordHash,
-    company,
-    color,
-    progress: cloneStarterProgress(),
-  };
-  if (pool) {
-    const result = await pool.query(
-      `INSERT INTO accounts
-        (username, username_key, password_hash, company, color, progress)
-       VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-       RETURNING *`,
-      [
-        record.username,
-        record.username_key,
-        record.password_hash,
-        record.company,
-        record.color,
-        JSON.stringify(record.progress),
-      ],
-    );
-    return result.rows[0];
-  }
-  localAccounts[record.username_key] = record;
-  saveLocalAccounts();
-  return record;
 }
 
 async function createGoogleAccount(profile) {
@@ -475,41 +454,31 @@ async function handleApi(request, response, requestUrl) {
     return;
   }
   try {
-    if (requestUrl.pathname === "/api/signup" && request.method === "POST") {
-      const body = await readJsonBody(request);
-      const username = cleanUsername(body.username);
-      const company = cleanCompany(body.company);
-      const password = String(body.password || "");
-      if (username.length < 3 || company.length < 2 || password.length < 6) {
-        sendJsonResponse(response, 400, {
-          error: "Use a 3+ character username, 2+ character company, and 6+ character password.",
-        });
-        return;
-      }
-      if (await findAccount(username)) {
-        sendJsonResponse(response, 409, { error: "That username is already taken." });
-        return;
-      }
-      const account = await createAccount(
-        username,
-        await hashPassword(password),
-        company,
-        cleanColor(body.color),
-      );
-      const token = createSession(account);
-      sendJsonResponse(response, 201, { token, account: publicAccount(account) });
+    if (
+      (requestUrl.pathname === "/api/signup" || requestUrl.pathname === "/api/signin")
+      && request.method === "POST"
+    ) {
+      sendJsonResponse(response, 410, {
+        error: "Username and password accounts were removed. Continue with Google.",
+      });
       return;
     }
 
-    if (requestUrl.pathname === "/api/signin" && request.method === "POST") {
+    if (
+      requestUrl.pathname === "/api/test-account"
+      && request.method === "POST"
+      && allowTestAuth
+    ) {
       const body = await readJsonBody(request);
-      const account = await findAccount(body.username);
-      if (!account || !(await verifyPassword(String(body.password || ""), account.password_hash))) {
-        sendJsonResponse(response, 401, { error: "Incorrect username or password." });
-        return;
-      }
+      const label = cleanUsername(body.label) || "Test Driver";
+      const unique = `${Date.now()}-${crypto.randomBytes(8).toString("hex")}`;
+      const account = await createGoogleAccount({
+        sub: `automated-test-${unique}`,
+        name: label,
+        email: "",
+      });
       const token = createSession(account);
-      sendJsonResponse(response, 200, { token, account: publicAccount(account) });
+      sendJsonResponse(response, 201, { token, account: publicAccount(account) });
       return;
     }
 
